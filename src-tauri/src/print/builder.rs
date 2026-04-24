@@ -145,10 +145,11 @@ pub fn build_receipt_lines(order: &Order, settings: &AppSettings) -> Vec<String>
 
     let mut lines: Vec<String> = Vec::new();
 
-    // Line 0 — customer name, centred horizontally (plain-text preview approximation)
-    let name = &order.customer_name;
-    let name_pad = (width.saturating_sub(name.len())) / 2;
-    lines.push(format!("{:>w$}", name, w = name_pad + name.len()));
+    // Line 0 — customer name, raw (no padding).
+    // Centering is handled by the frontend via CSS `text-align: center` on the
+    // `.preview-cname` element, so manual padding here would fight with the
+    // 2× font-size used for rendering and produce incorrect visual offset.
+    lines.push(order.customer_name.clone());
 
     lines.push(format!("  Tanggal  : {}", order.created_at));
     lines.push(String::new()); // blank line before items
@@ -392,16 +393,14 @@ mod tests {
     // ── build_receipt_lines ───────────────────────────────────────────────────
 
     #[test]
-    fn receipt_lines_line0_is_customer_name_centred() {
+    fn receipt_lines_line0_is_raw_customer_name() {
+        // build_receipt_lines returns the raw name on line 0.
+        // Centering is handled by the frontend CSS (.preview-cname { text-align: center }),
+        // so the Rust layer must NOT add any padding here.
         let order = make_order("Pak Budi", "1 sak beras");
-        let settings = default_settings(); // 80mm = 48 cols
+        let settings = default_settings();
         let lines = build_receipt_lines(&order, &settings);
-        // Name must appear and be padded (centred, not left-aligned with 2-space prefix)
-        assert!(lines[0].contains("Pak Budi"));
-        // "  Pak Budi" would be left-aligned; centred version has more leading space
-        // 48 - 8 = 40, pad = 20 → "                    Pak Budi"
-        assert!(lines[0].starts_with("                    Pak Budi"),
-            "name not centred: '{}'", lines[0]);
+        assert_eq!(lines[0], "Pak Budi");
     }
 
     #[test]

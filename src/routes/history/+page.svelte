@@ -28,22 +28,32 @@
   let previewText: string = $state('');
   let previewLoading = $state(false);
 
-  // Convert plain-text preview into HTML so line 0 (customer name) renders
-  // at double-height + bold — mirroring the ESC/POS GS ! 0x10 + bold on paper.
+  // Convert plain-text preview lines into HTML divs so CSS can accurately
+  // mirror what the ESC/POS printer produces:
+  //   - line 0 (customer name)  → .preview-cname  (2× height, bold, centred)
+  //   - lines with [ ] (items)  → .preview-item    (font from content_font_size)
+  //   - all other lines         → .line            (normal)
   const previewHtml = $derived(
     previewText.split('\n').map((line, i) => {
       const esc = line
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
-      return i === 0
-        ? `<span class="preview-cname">${esc}</span>`
-        : esc;
-    }).join('\n')
+      const safe = esc || '&nbsp;';
+      if (i === 0) return `<div class="line preview-cname">${safe}</div>`;
+      if (esc.includes('[ ]')) return `<div class="line preview-item">${esc}</div>`;
+      return `<div class="line">${safe}</div>`;
+    }).join('')
   );
 
   onMount(async () => {
     await loadOrders();
+    try {
+      const s = await api.getSettings();
+      paperWidth = CHAR_WIDTH[s.paper_size] ?? 48;
+      pcName = s.pc_name;
+      contentFontSize = s.content_font_size ?? 'normal';
+    } catch { /* ignore */ }
   });
 
   async function loadOrders() {
@@ -117,14 +127,17 @@
   const CHAR_WIDTH: Record<string, number> = { '58mm': 32, '75mm': 42, '80mm': 48 };
   let paperWidth = $state(48);
   let pcName = $state('');
+  let contentFontSize = $state('normal');
 
-  onMount(async () => {
-    try {
-      const s = await api.getSettings();
-      paperWidth = CHAR_WIDTH[s.paper_size] ?? 48;
-      pcName = s.pc_name;
-    } catch { /* ignore */ }
-  });
+  // CSS font-size for item lines — wide/large are 2× width, so double the visual size.
+  const itemFontSize = $derived(
+    (contentFontSize === 'wide' || contentFontSize === 'large') ? '1.56rem' : '0.78rem'
+  );
+  // CSS line-height for item lines — tall/large are 2× height.
+  const itemLineHeight = $derived(
+    (contentFontSize === 'tall' || contentFontSize === 'large') ? '3.1' : '1.55'
+  );
+
 </script>
 
 <div class="page">
@@ -262,9 +275,9 @@
         {#if previewLoading}
           <p class="receipt-loading">Memuat preview...</p>
         {:else}
-          <div class="paper" style="--cols: {paperWidth}">
+          <div class="paper" style="--cols: {paperWidth}; --item-fs: {itemFontSize}; --item-lh: {itemLineHeight}">
             <!-- {@html} is safe here: content is escaped above -->
-            <pre class="receipt-text">{@html previewHtml}</pre>
+            <div class="receipt-text">{@html previewHtml}</div>
           </div>
         {/if}
       </div>
@@ -544,18 +557,27 @@
     font-family: 'Courier New', Courier, monospace;
     font-size: .78rem;
     line-height: 1.55;
-    white-space: pre;
-    overflow-x: auto;
     color: #111;
-    margin: 0;
     letter-spacing: 0;
   }
 
-  /* Customer name: mirrors ESC/POS double-height (GS ! 0x10) + bold on paper */
+  /* Each line is a div; white-space:pre preserves spaces within the line */
+  .receipt-text :global(.line) {
+    white-space: pre;
+    display: block;
+  }
+
+  /* Customer name: mirrors ESC/POS justify-CENTER + GS!0x10 (double-height) + bold */
   .receipt-text :global(.preview-cname) {
-    font-size: 1.56rem; /* ≈ 2× the base .78rem */
+    font-size: 1.56rem; /* 2× base .78rem */
     font-weight: 700;
-    line-height: 1.2;
-    display: inline-block;
+    line-height: 1.3;
+    text-align: center;
+  }
+
+  /* Content items: font-size and line-height driven by CSS vars set from content_font_size */
+  .receipt-text :global(.preview-item) {
+    font-size: var(--item-fs, .78rem);
+    line-height: var(--item-lh, 1.55);
   }
 </style>
