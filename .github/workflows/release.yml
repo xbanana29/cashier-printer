@@ -59,7 +59,8 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
-            libcups2-dev
+            libcups2-dev \
+            libudev-dev
 
       - name: Install frontend dependencies
         run: bun install
