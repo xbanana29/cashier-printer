@@ -19,6 +19,10 @@ pub struct AppSettings {
     /// ESC/POS character size for the order content (item list) lines.
     /// "normal" = 1×1 · "tall" = 1×2 (double-height) · "wide" = 2×1 (double-width) · "large" = 2×2
     pub content_font_size: String,
+    /// Extra blank lines fed after the receipt (0–5).
+    /// Advances paper so the last printed line clears the print-head area on printers
+    /// that don't fully eject paper on their own.
+    pub extra_feeds: u8,
 }
 
 pub fn get_setting(conn: &Connection, key: &str) -> Result<String> {
@@ -55,6 +59,11 @@ pub fn get_all_settings(conn: &Connection) -> Result<AppSettings> {
         pc_name: get_setting(conn, "pc_name").unwrap_or_default(),
         content_font_size: get_setting(conn, "content_font_size")
             .unwrap_or_else(|_| "normal".to_string()),
+        extra_feeds: get_setting(conn, "extra_feeds")
+            .ok()
+            .and_then(|v| v.parse::<u8>().ok())
+            .map(|n| n.min(5))
+            .unwrap_or(0),
     })
 }
 
@@ -67,6 +76,7 @@ pub fn save_all_settings(conn: &Connection, settings: &AppSettings) -> Result<()
     set_setting(conn, "auto_cut", if settings.auto_cut { "true" } else { "false" })?;
     set_setting(conn, "pc_name", &settings.pc_name)?;
     set_setting(conn, "content_font_size", &settings.content_font_size)?;
+    set_setting(conn, "extra_feeds", &settings.extra_feeds.min(5).to_string())?;
     Ok(())
 }
 
@@ -85,7 +95,8 @@ mod tests {
              INSERT INTO settings VALUES ('serial_baud_rate',  '9600');
              INSERT INTO settings VALUES ('auto_cut',          'true');
              INSERT INTO settings VALUES ('pc_name',           '');
-             INSERT INTO settings VALUES ('content_font_size', 'normal');",
+             INSERT INTO settings VALUES ('content_font_size', 'normal');
+             INSERT INTO settings VALUES ('extra_feeds',       '0');",
         )
         .unwrap();
         conn
@@ -134,6 +145,7 @@ mod tests {
         assert_eq!(s.footer_text, "");
         assert_eq!(s.pc_name, "");
         assert_eq!(s.content_font_size, "normal");
+        assert_eq!(s.extra_feeds, 0);
     }
 
     #[test]
@@ -148,6 +160,7 @@ mod tests {
             auto_cut: false,
             pc_name: "Kasir 2".to_string(),
             content_font_size: "large".to_string(),
+            extra_feeds: 3,
         };
         save_all_settings(&conn, &original).unwrap();
         let loaded = get_all_settings(&conn).unwrap();
@@ -159,6 +172,34 @@ mod tests {
         assert!(!loaded.auto_cut);
         assert_eq!(loaded.pc_name, "Kasir 2");
         assert_eq!(loaded.content_font_size, "large");
+        assert_eq!(loaded.extra_feeds, 3);
+    }
+
+    #[test]
+    fn extra_feeds_clamped_to_5_on_save_and_load() {
+        let conn = setup();
+        let settings = AppSettings {
+            default_printer: String::new(),
+            paper_size: "80mm".to_string(),
+            store_name: String::new(),
+            footer_text: String::new(),
+            serial_baud_rate: 9600,
+            auto_cut: true,
+            pc_name: String::new(),
+            content_font_size: "normal".to_string(),
+            extra_feeds: 99, // over max
+        };
+        save_all_settings(&conn, &settings).unwrap();
+        let loaded = get_all_settings(&conn).unwrap();
+        assert_eq!(loaded.extra_feeds, 5, "extra_feeds must be clamped to 5");
+    }
+
+    #[test]
+    fn extra_feeds_invalid_string_falls_back_to_0() {
+        let conn = setup();
+        set_setting(&conn, "extra_feeds", "bad").unwrap();
+        let s = get_all_settings(&conn).unwrap();
+        assert_eq!(s.extra_feeds, 0);
     }
 
     #[test]

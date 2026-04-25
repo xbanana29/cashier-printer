@@ -13,6 +13,7 @@
     auto_cut: true,
     pc_name: '',
     content_font_size: 'normal',
+    extra_feeds: 0,
   });
 
   let printers: PrinterInfo[] = $state([]);
@@ -145,6 +146,25 @@
           </div>
         </label>
       </div>
+
+      <div class="field">
+        <label for="extra-feeds" class="field-label">
+          Baris Tambahan Setelah Cetak
+          <span class="label-optional">— untuk mendorong kertas keluar</span>
+        </label>
+        <select id="extra-feeds" class="field-select field-select-short" bind:value={settings.extra_feeds}>
+          <option value={0}>0 — tidak ada tambahan</option>
+          <option value={1}>1 baris</option>
+          <option value={2}>2 baris</option>
+          <option value={3}>3 baris</option>
+          <option value={4}>4 baris</option>
+          <option value={5}>5 baris</option>
+        </select>
+        <p class="field-support">
+          Tambahkan baris kosong agar tulisan terakhir keluar dari kepala cetak.
+          Berguna untuk TM-U220 dan printer non-standar yang tidak otomatis mengeluarkan kertas.
+        </p>
+      </div>
     </div>
 
     <!-- ── Template section ──────────────────────── -->
@@ -273,6 +293,7 @@
   }
   .field-select:focus { border: 2px solid var(--md-primary); }
   .field-select:disabled { background: var(--md-surface-variant); cursor: not-allowed; }
+  .field-select-short { max-width: 240px; }
 
   .field-support { font-size: .72rem; color: var(--md-on-surface-variant); line-height: 1.5; }
   code { background: var(--md-surface-variant); padding: .1em .3em; border-radius: 3px; font-size: .82em; }

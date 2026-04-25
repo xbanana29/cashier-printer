@@ -148,40 +148,76 @@ pub fn build_receipt_lines(order: &Order, settings: &AppSettings) -> Vec<String>
 
     let mut lines: Vec<String> = Vec::new();
 
-    // Line 0 — customer name, raw (no padding).
-    // Centering is handled by the frontend via CSS `text-align: center` on the
-    // `.preview-cname` element, so manual padding here would fight with the
-    // 2× font-size used for rendering and produce incorrect visual offset.
-    lines.push(order.customer_name.clone());
+    if order.order_type == "receipt" {
+        // ── Tanda Terima layout ───────────────────────────────────────────────
+        // Line 0 = "TANDA TERIMA" → rendered as .preview-cname (big, bold, centred)
+        lines.push("TANDA TERIMA".to_string());
+        lines.push(format!("  Diterima dari : {}", order.customer_name));
+        lines.push(format!("  Tanggal       : {}", order.created_at));
+        lines.push(String::new()); // blank before items
 
-    lines.push(format!("  Tanggal  : {}", order.created_at));
-    lines.push(String::new()); // blank line before items
-
-    // Content items with dot-leaders + checkbox, wrapped to effective column width
-    for item in order.content.lines() {
-        for line in format_item_line(item, eff_width) {
-            lines.push(line);
+        for item in order.content.lines() {
+            for line in format_item_line(item, eff_width) {
+                lines.push(line);
+            }
         }
-    }
 
-    lines.push(String::new()); // blank line after items
+        lines.push(String::new()); // blank after items
 
-    // Footer
-    if !settings.footer_text.is_empty() {
-        let pad = (width.saturating_sub(settings.footer_text.len())) / 2;
-        lines.push(format!("{:>width$}", settings.footer_text, width = pad + settings.footer_text.len()));
-    }
+        // Signature area: 3 blank lines + underline + name placeholder
+        lines.push(String::new());
+        lines.push(String::new());
+        lines.push(String::new());
+        let sig = "_".repeat(20);
+        let sig_pad = (width.saturating_sub(20)) / 2;
+        lines.push(format!("{:>w$}", sig, w = sig_pad + 20));
+        let label = "(Nama Terang)";
+        let label_pad = (width.saturating_sub(label.len())) / 2;
+        lines.push(format!("{:>w$}", label, w = label_pad + label.len()));
+    } else {
+        // ── Pesanan (order) layout ────────────────────────────────────────────
+        // Line 0 — customer name, raw (no padding).
+        // Centering is handled by the frontend via CSS `text-align: center` on the
+        // `.preview-cname` element, so manual padding here would fight with the
+        // 2× font-size used for rendering and produce incorrect visual offset.
+        lines.push(order.customer_name.clone());
 
-    // Store name at bottom, centred within the 2-space indented area
-    if !settings.store_name.is_empty() {
-        let available = width.saturating_sub(2);
-        let pad = (available.saturating_sub(settings.store_name.len())) / 2;
-        lines.push(format!("  {:>width$}", settings.store_name, width = pad + settings.store_name.len()));
-    }
+        lines.push(format!("  Tanggal  : {}", order.created_at));
+        lines.push(String::new()); // blank line before items
 
-    // PC name
-    if !settings.pc_name.is_empty() {
-        lines.push(format!("PC: {}", settings.pc_name));
+        for item in order.content.lines() {
+            for line in format_item_line(item, eff_width) {
+                lines.push(line);
+            }
+        }
+
+        lines.push(String::new()); // blank line after items
+
+        // Footer
+        if !settings.footer_text.is_empty() {
+            let pad = (width.saturating_sub(settings.footer_text.len())) / 2;
+            lines.push(format!(
+                "{:>width$}",
+                settings.footer_text,
+                width = pad + settings.footer_text.len()
+            ));
+        }
+
+        // Store name at bottom, centred within the 2-space indented area
+        if !settings.store_name.is_empty() {
+            let available = width.saturating_sub(2);
+            let pad = (available.saturating_sub(settings.store_name.len())) / 2;
+            lines.push(format!(
+                "  {:>width$}",
+                settings.store_name,
+                width = pad + settings.store_name.len()
+            ));
+        }
+
+        // PC name
+        if !settings.pc_name.is_empty() {
+            lines.push(format!("PC: {}", settings.pc_name));
+        }
     }
 
     lines
@@ -196,66 +232,98 @@ pub fn build_receipt(order: &Order, settings: &AppSettings) -> Vec<u8> {
     let driver = VecDriver::new();
     let driver_clone = driver.clone();
 
-    // Scope the Printer so it is dropped (and its internal buffer flushed to the
-    // driver) before we call driver_clone.into_bytes().
     {
         let mut printer = Printer::new(driver, Protocol::default(), None);
 
         let result: EscResult<()> = (|| {
             printer.init()?;
 
-            // ── Customer name: centred, double-height, bold ───────────────────
-            printer.justify(JustifyMode::CENTER)?;
-            // GS ! 0x10 → double height (height×2, width×1)
-            printer.custom(b"\x1D\x21\x10")?;
-            printer.bold(true)?;
-            printer.writeln(&order.customer_name)?;
-            printer.bold(false)?;
-            // GS ! 0x00 → reset to normal size
-            printer.custom(b"\x1D\x21\x00")?;
-            printer.justify(JustifyMode::LEFT)?;
+            if order.order_type == "receipt" {
+                // ── TANDA TERIMA header ───────────────────────────────────────
+                printer.justify(JustifyMode::CENTER)?;
+                printer.custom(b"\x1D\x21\x10")?; // double height
+                printer.bold(true)?;
+                printer.writeln("TANDA TERIMA")?;
+                printer.bold(false)?;
+                printer.custom(b"\x1D\x21\x00")?;
+                printer.justify(JustifyMode::LEFT)?;
 
-            // ── Date ──────────────────────────────────────────────────────────
-            printer.writeln(&format!("  Tanggal  : {}", order.created_at))?;
-            printer.writeln("")?; // blank line before items
+                printer.writeln(&format!("  Diterima dari : {}", order.customer_name))?;
+                printer.writeln(&format!("  Tanggal       : {}", order.created_at))?;
+                printer.writeln("")?;
 
-            // ── Content items with configured font size ───────────────────────
-            printer.custom(&[0x1D, 0x21, font_byte])?;
-            for item in order.content.lines() {
-                for line in format_item_line(item, eff_width) {
-                    printer.writeln(&line)?;
+                // ── Content items ─────────────────────────────────────────────
+                printer.custom(&[0x1D, 0x21, font_byte])?;
+                for item in order.content.lines() {
+                    for line in format_item_line(item, eff_width) {
+                        printer.writeln(&line)?;
+                    }
+                }
+                printer.custom(b"\x1D\x21\x00")?;
+                printer.writeln("")?;
+
+                // ── Signature area ────────────────────────────────────────────
+                printer.writeln("")?;
+                printer.writeln("")?;
+                printer.writeln("")?;
+                let sig = "_".repeat(20);
+                let sig_pad = (width.saturating_sub(20)) / 2;
+                printer.writeln(&format!("{:>w$}", sig, w = sig_pad + 20))?;
+                let label = "(Nama Terang)";
+                let label_pad = (width.saturating_sub(label.len())) / 2;
+                printer.writeln(&format!("{:>w$}", label, w = label_pad + label.len()))?;
+            } else {
+                // ── Customer name: centred, double-height, bold ───────────────
+                printer.justify(JustifyMode::CENTER)?;
+                // GS ! 0x10 → double height (height×2, width×1)
+                printer.custom(b"\x1D\x21\x10")?;
+                printer.bold(true)?;
+                printer.writeln(&order.customer_name)?;
+                printer.bold(false)?;
+                // GS ! 0x00 → reset to normal size
+                printer.custom(b"\x1D\x21\x00")?;
+                printer.justify(JustifyMode::LEFT)?;
+
+                printer.writeln(&format!("  Tanggal  : {}", order.created_at))?;
+                printer.writeln("")?;
+
+                // ── Content items with configured font size ───────────────────
+                printer.custom(&[0x1D, 0x21, font_byte])?;
+                for item in order.content.lines() {
+                    for line in format_item_line(item, eff_width) {
+                        printer.writeln(&line)?;
+                    }
+                }
+                printer.custom(b"\x1D\x21\x00")?;
+                printer.writeln("")?;
+
+                // ── Footer ────────────────────────────────────────────────────
+                if !settings.footer_text.is_empty() {
+                    let pad = (width.saturating_sub(settings.footer_text.len())) / 2;
+                    printer.writeln(&format!(
+                        "{:>w$}",
+                        settings.footer_text,
+                        w = pad + settings.footer_text.len()
+                    ))?;
+                }
+
+                // ── Store name: centred via ESC/POS alignment ─────────────────
+                if !settings.store_name.is_empty() {
+                    printer.justify(JustifyMode::CENTER)?;
+                    printer.writeln(&settings.store_name)?;
+                    printer.justify(JustifyMode::LEFT)?;
+                }
+
+                // ── PC / kasir name ───────────────────────────────────────────
+                if !settings.pc_name.is_empty() {
+                    printer.writeln(&format!("PC: {}", settings.pc_name))?;
                 }
             }
-            printer.custom(b"\x1D\x21\x00")?; // reset font to normal
-            printer.writeln("")?; // blank line after items
 
-            // ── Footer ────────────────────────────────────────────────────────
-            if !settings.footer_text.is_empty() {
-                let pad = (width.saturating_sub(settings.footer_text.len())) / 2;
-                printer.writeln(&format!(
-                    "{:>w$}",
-                    settings.footer_text,
-                    w = pad + settings.footer_text.len()
-                ))?;
-            }
-
-            // ── Store name: centred via ESC/POS alignment ─────────────────────
-            if !settings.store_name.is_empty() {
-                printer.justify(JustifyMode::CENTER)?;
-                printer.writeln(&settings.store_name)?;
-                printer.justify(JustifyMode::LEFT)?;
-            }
-
-            // ── PC / kasir name ───────────────────────────────────────────────
-            if !settings.pc_name.is_empty() {
-                printer.writeln(&format!("PC: {}", settings.pc_name))?;
-            }
-
-            printer.feeds(3)?;
+            printer.feeds(3 + settings.extra_feeds)?;
             if settings.auto_cut {
                 printer.print_cut()?;
             } else {
-                // Flush buffered instructions to the driver without sending a cut command.
                 printer.print()?;
             }
             Ok(())
@@ -264,7 +332,7 @@ pub fn build_receipt(order: &Order, settings: &AppSettings) -> Vec<u8> {
         if let Err(e) = result {
             eprintln!("ESC/POS build error: {e}");
         }
-    } // Printer dropped here — flushes any internally-buffered bytes to VecDriver
+    }
 
     driver_clone.into_bytes()
 }
@@ -290,6 +358,7 @@ mod tests {
             auto_cut: false,
             pc_name: String::new(),
             content_font_size: "normal".to_string(),
+            extra_feeds: 0,
         }
     }
 
@@ -298,6 +367,17 @@ mod tests {
             id: 1,
             customer_name: customer.to_string(),
             content: content.to_string(),
+            order_type: "order".to_string(),
+            created_at: "2026-04-24 10:00:00".to_string(),
+        }
+    }
+
+    fn make_receipt(customer: &str, content: &str) -> Order {
+        Order {
+            id: 2,
+            customer_name: customer.to_string(),
+            content: content.to_string(),
+            order_type: "receipt".to_string(),
             created_at: "2026-04-24 10:00:00".to_string(),
         }
     }
@@ -646,6 +726,33 @@ mod tests {
         assert!(bytes_cut.len() > bytes_no_cut.len());
     }
 
+    #[test]
+    fn build_receipt_extra_feeds_changes_esc_d_value() {
+        // feeds() emits ESC d n = [0x1B, 0x64, n] — 3 bytes, only n changes.
+        // Verify the correct n = (3 + extra_feeds) appears in the byte stream.
+        let order = make_order("X", "item");
+        let mut settings = default_settings();
+        for extra in [0u8, 1, 3, 5] {
+            settings.extra_feeds = extra;
+            let bytes = build_receipt(&order, &settings);
+            let expected_n = 3 + extra;
+            assert!(
+                bytes.windows(3).any(|w| w == [0x1B, 0x64, expected_n]),
+                "extra_feeds={extra}: expected ESC d {expected_n} ([0x1B,0x64,{expected_n:#04x}]) in output"
+            );
+        }
+    }
+
+    #[test]
+    fn build_receipt_extra_feeds_zero_same_as_default() {
+        let order = make_order("X", "item");
+        let settings = default_settings(); // extra_feeds = 0
+        let bytes_default = build_receipt(&order, &settings);
+        let mut s2 = default_settings();
+        s2.extra_feeds = 0;
+        assert_eq!(bytes_default, build_receipt(&order, &s2));
+    }
+
     // ── build_receipt_preview ─────────────────────────────────────────────────
 
     #[test]
@@ -655,6 +762,70 @@ mod tests {
         let preview = build_receipt_preview(&order, &settings);
         assert!(preview.contains("DK PASAR"));
     }
+
+    // ── tanda terima layout ───────────────────────────────────────────────────
+
+    #[test]
+    fn receipt_lines_tanda_terima_line0_is_header() {
+        let order = make_receipt("Toko Maju", "Jenis : Retur\nGudang : A");
+        let lines = build_receipt_lines(&order, &default_settings());
+        assert_eq!(lines[0], "TANDA TERIMA");
+    }
+
+    #[test]
+    fn receipt_lines_tanda_terima_has_diterima_dari() {
+        let order = make_receipt("Pak Budi", "Jenis : Retur");
+        let lines = build_receipt_lines(&order, &default_settings());
+        assert!(
+            lines.iter().any(|l| l.contains("Diterima dari") && l.contains("Pak Budi")),
+            "expected 'Diterima dari : Pak Budi' line"
+        );
+    }
+
+    #[test]
+    fn receipt_lines_tanda_terima_has_signature_line() {
+        let order = make_receipt("X", "Jenis : Titip");
+        let lines = build_receipt_lines(&order, &default_settings());
+        assert!(
+            lines.iter().any(|l| l.contains("____________________")),
+            "expected signature underline"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("(Nama Terang)")),
+            "expected '(Nama Terang)' label"
+        );
+    }
+
+    #[test]
+    fn receipt_lines_tanda_terima_no_store_no_footer_no_pc() {
+        let order = make_receipt("X", "Jenis : Retur");
+        let mut settings = default_settings();
+        settings.store_name = "Toko".to_string();
+        settings.footer_text = "Terima kasih".to_string();
+        settings.pc_name = "Kasir 1".to_string();
+        let lines = build_receipt_lines(&order, &settings);
+        // store, footer, and pc_name must not appear in tanda terima
+        assert!(!lines.iter().any(|l| l.contains("Toko")));
+        assert!(!lines.iter().any(|l| l.contains("Terima kasih")));
+        assert!(!lines.iter().any(|l| l.contains("PC:")));
+    }
+
+    #[test]
+    fn build_receipt_tanda_terima_returns_nonempty_bytes() {
+        let order = make_receipt("Pak Budi", "Jenis : Retur\nGudang : A");
+        let bytes = build_receipt(&order, &default_settings());
+        assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn build_receipt_tanda_terima_has_center_alignment() {
+        let order = make_receipt("X", "item");
+        let bytes = build_receipt(&order, &default_settings());
+        assert!(
+            bytes.windows(3).any(|w| w == [0x1B, 0x61, 0x01]),
+            "missing ESC a 1 (centre)"
+        );
+    }
 }
 
 /// Build a simple test receipt.
@@ -663,6 +834,7 @@ pub fn build_test_receipt(settings: &AppSettings) -> Vec<u8> {
         id: 0,
         customer_name: "Test Print".to_string(),
         content: "2 sak aci\n1 sak terigu\n10 kg gula los\n40 kg minyak curah goreng kemasan besar ekonomis\nPesanan dengan nama barang yang sangat panjang sekali sampai harus lanjut baris berikutnya\n5 karton teh botol sosro".to_string(),
+        order_type: "order".to_string(),
         created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
     };
     build_receipt(&test_order, settings)

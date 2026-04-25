@@ -4,6 +4,9 @@
   import { showToast, showError } from '$lib/stores.svelte';
   import type { Order } from '$lib/types';
 
+  type TabType = 'order' | 'receipt';
+
+  let activeTab: TabType = $state('order');
   let orders: Order[] = $state([]);
   let search = $state('');
   let loading = $state(true);
@@ -12,6 +15,8 @@
 
   const PAGE_SIZE = 25;
   let page = $state(1);
+
+  const typeLabel = $derived(activeTab === 'receipt' ? 'Tanda Terima' : 'Pesanan');
 
   const filtered = $derived(
     search.trim() === ''
@@ -28,15 +33,6 @@
   let previewText: string = $state('');
   let previewLoading = $state(false);
 
-  // Convert plain-text preview lines into HTML divs so CSS can accurately
-  // mirror what the ESC/POS printer produces:
-  //   - line 0 (customer name)  → .preview-cname  (2× height, bold, centred)
-  //   - lines with [ ] (items)  → .preview-item    (font-size + line-height inlined)
-  //   - all other lines         → .line            (normal)
-  //
-  // IMPORTANT: contentFontSize is accessed here so this derived recomputes
-  // whenever the font setting changes — inline styles are used instead of
-  // CSS variables to guarantee the correct size is applied to {@html} content.
   const previewHtml = $derived.by(() => {
     const fs = (contentFontSize === 'wide' || contentFontSize === 'large') ? '1.56rem' : '0.78rem';
     const lh = (contentFontSize === 'tall' || contentFontSize === 'large') ? '3.1' : '1.55';
@@ -66,14 +62,21 @@
 
   async function loadOrders() {
     loading = true;
+    search = '';
     try {
       await api.purgeOldOrders();
-      orders = await api.getOrders();
+      orders = await api.getOrders(activeTab);
     } catch (err) {
       showError(err);
     } finally {
       loading = false;
     }
+  }
+
+  async function switchTab(tab: TabType) {
+    if (tab === activeTab) return;
+    activeTab = tab;
+    await loadOrders();
   }
 
   async function openPreview(order: Order) {
@@ -98,7 +101,7 @@
   async function reprint(id: number) {
     try {
       await api.reprintOrder(id);
-      showToast('Pesanan berhasil dicetak ulang');
+      showToast(`${typeLabel} berhasil dicetak ulang`);
     } catch (err) {
       showError(err);
     }
@@ -110,7 +113,7 @@
     try {
       await api.deleteOrder(id);
       orders = orders.filter(o => o.id !== id);
-      showToast('Pesanan dihapus');
+      showToast(`${typeLabel} dihapus`);
     } catch (err) {
       showError(err);
     } finally {
@@ -136,15 +139,33 @@
   let paperWidth = $state(48);
   let pcName = $state('');
   let contentFontSize = $state('normal');
-
-
 </script>
 
 <div class="page">
   <div class="page-header">
-    <h2>Riwayat Pesanan</h2>
+    <h2>Riwayat</h2>
     <button class="btn-icon-sm" onclick={loadOrders} title="Muat ulang">
       <span class="material-symbols-outlined">refresh</span>
+    </button>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button
+      class="tab"
+      class:tab-active={activeTab === 'order'}
+      onclick={() => switchTab('order')}
+    >
+      <span class="material-symbols-outlined">receipt</span>
+      Pesanan
+    </button>
+    <button
+      class="tab"
+      class:tab-active={activeTab === 'receipt'}
+      onclick={() => switchTab('receipt')}
+    >
+      <span class="material-symbols-outlined">assignment</span>
+      Tanda Terima
     </button>
   </div>
 
@@ -154,7 +175,7 @@
     <input
       class="search-input"
       type="search"
-      placeholder="Cari nama pelanggan..."
+      placeholder="Cari nama..."
       bind:value={search}
     />
     {#if search}
@@ -165,9 +186,9 @@
   {#if loading}
     <p class="state-msg">Memuat...</p>
   {:else if orders.length === 0}
-    <p class="state-msg">Belum ada pesanan.</p>
+    <p class="state-msg">Belum ada {typeLabel.toLowerCase()}.</p>
   {:else if filtered.length === 0}
-    <p class="state-msg">Tidak ada pesanan untuk "<strong>{search}</strong>".</p>
+    <p class="state-msg">Tidak ada {typeLabel.toLowerCase()} untuk "<strong>{search}</strong>".</p>
   {:else}
     <div class="list">
       {#each paginated as order (order.id)}
@@ -293,7 +314,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 1.25rem;
+    margin-bottom: 1rem;
   }
 
   h2 {
@@ -315,6 +336,38 @@
   }
   .btn-icon-sm:hover { background: var(--md-surface-variant); }
   .btn-icon-sm .material-symbols-outlined { font-size: 20px; }
+
+  /* ── Tabs ── */
+  .tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--md-outline-variant);
+  }
+
+  .tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 44px;
+    padding: 0 20px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    font-size: .875rem;
+    font-weight: 500;
+    font-family: 'Roboto', sans-serif;
+    color: var(--md-on-surface-variant);
+    cursor: pointer;
+    transition: color .15s, border-color .15s;
+    margin-bottom: -1px;
+  }
+  .tab .material-symbols-outlined { font-size: 18px; }
+  .tab:hover { color: var(--md-on-surface); background: var(--md-surface-variant); }
+  .tab.tab-active {
+    color: var(--md-primary);
+    border-bottom-color: var(--md-primary);
+  }
 
   /* ── Search bar ── */
   .search-bar {
@@ -561,19 +614,15 @@
     letter-spacing: 0;
   }
 
-  /* Each line is a div; white-space:pre preserves spaces within the line */
   .receipt-text :global(.line) {
     white-space: pre;
     display: block;
   }
 
-  /* Customer name: mirrors ESC/POS justify-CENTER + GS!0x10 (double-height) + bold */
   .receipt-text :global(.preview-cname) {
-    font-size: 1.56rem; /* 2× base .78rem */
+    font-size: 1.56rem;
     font-weight: 700;
     line-height: 1.3;
     text-align: center;
   }
-
-  /* Content items: font-size and line-height are inlined directly from previewHtml derived */
 </style>

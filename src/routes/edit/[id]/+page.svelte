@@ -11,6 +11,7 @@
   let customerName = $state('');
   let content = $state('');
   let createdAt = $state('');
+  let orderType = $state('order');
   let loading = $state(true);
   let saving = $state(false);
   let charWidth = $state(48);
@@ -26,6 +27,7 @@
       customerName = order.customer_name;
       content = order.content;
       createdAt = order.created_at;
+      orderType = order.order_type;
       charWidth = CHAR_WIDTH[settings.paper_size] ?? 48;
     } catch (err) {
       showError(err);
@@ -75,7 +77,7 @@
 
 <div class="page">
   <div class="page-header">
-    <h2>Edit Pesanan</h2>
+    <h2>{orderType === 'receipt' ? 'Edit Tanda Terima' : 'Edit Pesanan'}</h2>
     <a href="/history" class="btn-text">
       <span class="material-symbols-outlined">arrow_back</span>
       Kembali
@@ -92,7 +94,7 @@
       </div>
 
       <div class="field">
-        <label for="customer" class="field-label">Nama Pelanggan</label>
+        <label for="customer" class="field-label">{orderType === 'receipt' ? 'Diterima dari' : 'Nama Pelanggan'}</label>
         <input
           id="customer"
           class="field-input"
@@ -105,7 +107,7 @@
 
       <div class="field">
         <label for="content" class="field-label">
-          Isi Pesanan
+          {orderType === 'receipt' ? 'Isi Tanda Terima' : 'Isi Pesanan'}
           <span class="label-hint">— garis biru = batas {charWidth} kolom</span>
         </label>
         <GuidedTextarea id="content"

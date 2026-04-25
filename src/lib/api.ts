@@ -3,11 +3,11 @@ import type { Order, AppSettings, PrinterInfo } from './types';
 
 export const api = {
   // Orders
-  createOrder: (customerName: string, content: string): Promise<number> =>
-    invoke<number>('create_order', { customerName, content }),
+  createOrder: (customerName: string, content: string, orderType: string): Promise<number> =>
+    invoke<number>('create_order', { customerName, content, orderType }),
 
-  getOrders: (): Promise<Order[]> =>
-    invoke<Order[]>('get_orders'),
+  getOrders: (orderType: string): Promise<Order[]> =>
+    invoke<Order[]>('get_orders', { orderType }),
 
   getOrder: (id: number): Promise<Order> =>
     invoke<Order>('get_order', { id }),

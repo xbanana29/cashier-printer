@@ -13,6 +13,7 @@ const SCHEMA_SQL: &str = "
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
         customer_name TEXT NOT NULL,
         content       TEXT NOT NULL,
+        order_type    TEXT NOT NULL DEFAULT 'order',
         created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -29,11 +30,16 @@ const SCHEMA_SQL: &str = "
     INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_cut',           'true');
     INSERT OR IGNORE INTO settings (key, value) VALUES ('pc_name',            '');
     INSERT OR IGNORE INTO settings (key, value) VALUES ('content_font_size',  'normal');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('extra_feeds',        '0');
 ";
 
 pub fn init(app_data_dir: &std::path::Path) -> Result<DbConn> {
     let db_path = app_data_dir.join("orders.db");
     let conn = Connection::open(&db_path)?;
     conn.execute_batch(SCHEMA_SQL)?;
+    // Migration for existing DBs: no-op if column already exists
+    let _ = conn.execute_batch(
+        "ALTER TABLE orders ADD COLUMN order_type TEXT NOT NULL DEFAULT 'order';",
+    );
     Ok(Arc::new(Mutex::new(conn)))
 }

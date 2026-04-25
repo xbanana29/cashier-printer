@@ -2,6 +2,7 @@ export interface Order {
   id: number;
   customer_name: string;
   content: string;
+  order_type: string;
   created_at: string;
 }
 
@@ -18,6 +19,8 @@ export interface AppSettings {
   pc_name: string;
   /** ESC/POS character size for order content lines: "normal" | "tall" | "wide" | "large" */
   content_font_size: string;
+  /** Extra blank lines fed after the receipt (0–5) to push paper past the print head. */
+  extra_feeds: number;
 }
 
 export interface PrinterInfo {
