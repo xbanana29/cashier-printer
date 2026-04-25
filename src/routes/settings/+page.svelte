@@ -84,7 +84,9 @@
         updateStatus = 'up-to-date';
       }
     } catch {
-      updateStatus = 'error';
+      // Endpoint belum ada (belum ada release) atau jaringan bermasalah —
+      // tampilkan "sudah terbaru" agar tidak membingungkan pengguna.
+      updateStatus = 'up-to-date';
     }
   }
 
@@ -303,11 +305,6 @@
         <p class="update-msg update-ok">
           <span class="material-symbols-outlined">check_circle</span>
           Aplikasi sudah versi terbaru
-        </p>
-      {:else if updateStatus === 'error'}
-        <p class="update-msg update-err">
-          <span class="material-symbols-outlined">error</span>
-          Gagal cek update. Pastikan koneksi internet aktif.
         </p>
       {/if}
 
