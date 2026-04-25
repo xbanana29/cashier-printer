@@ -1,6 +1,15 @@
 use rusqlite::{Connection, Result, params};
 use serde::{Deserialize, Serialize};
 
+fn fmt_date(raw: &str) -> String {
+    // "2026-04-25 14:32:00" → "25/04/26"
+    if raw.len() >= 10 {
+        format!("{}/{}/{}", &raw[8..10], &raw[5..7], &raw[2..4])
+    } else {
+        raw.to_string()
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Order {
     pub id: i64,
@@ -34,7 +43,7 @@ pub fn get_orders(conn: &Connection, order_type: &str) -> Result<Vec<Order>> {
             customer_name: row.get(1)?,
             content: row.get(2)?,
             order_type: row.get(3)?,
-            created_at: row.get(4)?,
+            created_at: fmt_date(&row.get::<_, String>(4)?),
         })
     })?;
     rows.collect()
@@ -50,7 +59,7 @@ pub fn get_order(conn: &Connection, id: i64) -> Result<Order> {
                 customer_name: row.get(1)?,
                 content: row.get(2)?,
                 order_type: row.get(3)?,
-                created_at: row.get(4)?,
+                created_at: fmt_date(&row.get::<_, String>(4)?),
             })
         },
     )

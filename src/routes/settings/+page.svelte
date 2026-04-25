@@ -3,6 +3,18 @@
   import { api } from '$lib/api';
   import { showToast, showError } from '$lib/stores.svelte';
   import type { AppSettings, PrinterInfo } from '$lib/types';
+  import { check } from '@tauri-apps/plugin-updater';
+  import { relaunch } from '@tauri-apps/plugin-process';
+  import { getVersion } from '@tauri-apps/api/app';
+
+  type UpdateStatus = 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'error';
+
+  let currentVersion = $state('');
+  let updateStatus: UpdateStatus = $state('idle');
+  let updateInfo: { version: string; body: string } | null = $state(null);
+  let downloadProgress = $state(0);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let pendingUpdate: any = null;
 
   let settings: AppSettings = $state({
     default_printer: '',
@@ -22,6 +34,7 @@
   let testing = $state(false);
 
   onMount(async () => {
+    currentVersion = await getVersion().catch(() => '—');
     await loadSettings();
     await loadPrinters();
   });
@@ -54,6 +67,47 @@
       showError(err);
     } finally {
       saving = false;
+    }
+  }
+
+  async function checkUpdate() {
+    updateStatus = 'checking';
+    updateInfo = null;
+    pendingUpdate = null;
+    try {
+      const update = await check();
+      if (update) {
+        updateStatus = 'available';
+        updateInfo = { version: update.version, body: update.body ?? '' };
+        pendingUpdate = update;
+      } else {
+        updateStatus = 'up-to-date';
+      }
+    } catch {
+      updateStatus = 'error';
+    }
+  }
+
+  async function installUpdate() {
+    if (!pendingUpdate) return;
+    updateStatus = 'downloading';
+    downloadProgress = 0;
+    try {
+      let downloaded = 0;
+      let total = 0;
+      await pendingUpdate.downloadAndInstall((event: { event: string; data?: { contentLength?: number; chunkLength?: number } }) => {
+        if (event.event === 'Started') {
+          total = event.data?.contentLength ?? 0;
+        } else if (event.event === 'Progress') {
+          downloaded += event.data?.chunkLength ?? 0;
+          if (total > 0) downloadProgress = Math.round((downloaded / total) * 100);
+        }
+      });
+      showToast('Update selesai, aplikasi akan restart...');
+      await relaunch();
+    } catch (err) {
+      showError(err);
+      updateStatus = 'available';
     }
   }
 
@@ -209,6 +263,66 @@
         <label for="pcname" class="field-label">Nama PC / Kasir</label>
         <input id="pcname" class="field-input" type="text" placeholder="Contoh: Kasir 1" bind:value={settings.pc_name} />
         <p class="field-support">Muncul di baris bawah struk dan di kolom riwayat pesanan.</p>
+      </div>
+    </div>
+
+    <!-- ── Tentang & Update ─────────────────────── -->
+    <div class="section">
+      <div class="section-header">
+        <span class="material-symbols-outlined section-icon">system_update</span>
+        <span class="section-title">Tentang & Update</span>
+      </div>
+
+      <div class="about-row">
+        <span class="about-label">Versi saat ini</span>
+        <span class="about-value">v{currentVersion}</span>
+      </div>
+
+      {#if updateStatus === 'available' && updateInfo}
+        <div class="update-banner">
+          <span class="material-symbols-outlined update-icon">new_releases</span>
+          <div class="update-info">
+            <span class="update-title">Update tersedia: v{updateInfo.version}</span>
+            {#if updateInfo.body}
+              <span class="update-notes">{updateInfo.body}</span>
+            {/if}
+          </div>
+        </div>
+        <button type="button" class="btn-update" onclick={installUpdate} disabled={updateStatus === 'downloading'}>
+          <span class="material-symbols-outlined">download</span>
+          Download & Pasang v{updateInfo.version}
+        </button>
+      {:else if updateStatus === 'downloading'}
+        <div class="progress-row">
+          <div class="progress-bar">
+            <div class="progress-fill" style="width: {downloadProgress}%"></div>
+          </div>
+          <span class="progress-label">{downloadProgress}%</span>
+        </div>
+      {:else if updateStatus === 'up-to-date'}
+        <p class="update-msg update-ok">
+          <span class="material-symbols-outlined">check_circle</span>
+          Aplikasi sudah versi terbaru
+        </p>
+      {:else if updateStatus === 'error'}
+        <p class="update-msg update-err">
+          <span class="material-symbols-outlined">error</span>
+          Gagal cek update. Pastikan koneksi internet aktif.
+        </p>
+      {/if}
+
+      <div class="field" style="margin-top: 8px; margin-bottom: 0">
+        <button
+          type="button"
+          class="btn-outlined"
+          onclick={checkUpdate}
+          disabled={updateStatus === 'checking' || updateStatus === 'downloading'}
+        >
+          <span class="material-symbols-outlined">
+            {updateStatus === 'checking' ? 'hourglass_empty' : 'sync'}
+          </span>
+          {updateStatus === 'checking' ? 'Mengecek...' : 'Cek Update'}
+        </button>
       </div>
     </div>
 
@@ -373,6 +487,50 @@
   .switch-name { font-size: .9375rem; font-weight: 500; color: var(--md-on-surface); }
   .switch-desc { font-size: .75rem; color: var(--md-on-surface-variant); line-height: 1.5; }
   .switch-desc strong { color: var(--md-on-surface); }
+
+  /* ── About / Update ── */
+  .about-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 0 10px; margin-bottom: 8px;
+    border-bottom: 1px solid var(--md-outline-variant);
+  }
+  .about-label { font-size: .875rem; color: var(--md-on-surface-variant); }
+  .about-value { font-size: .875rem; font-weight: 600; color: var(--md-on-surface); }
+
+  .update-banner {
+    display: flex; align-items: flex-start; gap: 10px;
+    background: var(--md-primary-container);
+    border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;
+  }
+  .update-icon { font-size: 20px; color: var(--md-primary); flex-shrink: 0; }
+  .update-info { display: flex; flex-direction: column; gap: 2px; }
+  .update-title { font-size: .875rem; font-weight: 600; color: var(--md-primary); }
+  .update-notes { font-size: .75rem; color: var(--md-on-surface-variant); white-space: pre-wrap; }
+
+  .update-msg {
+    display: flex; align-items: center; gap: 6px;
+    font-size: .875rem; padding: 6px 0; margin-bottom: 4px;
+  }
+  .update-msg .material-symbols-outlined { font-size: 18px; }
+  .update-ok { color: #1a7a4a; }
+  .update-err { color: var(--md-error, #b00020); }
+
+  .btn-update {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    width: 100%; height: 40px; padding: 0 24px; margin-bottom: 10px;
+    background: var(--md-primary); color: var(--md-on-primary);
+    border: none; border-radius: 20px;
+    font-size: .875rem; font-weight: 500; font-family: 'Roboto', sans-serif;
+    cursor: pointer; transition: box-shadow .15s;
+  }
+  .btn-update .material-symbols-outlined { font-size: 18px; }
+  .btn-update:hover:not(:disabled) { box-shadow: var(--md-elev-1); }
+  .btn-update:disabled { opacity: .38; cursor: not-allowed; }
+
+  .progress-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .progress-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--md-outline-variant); overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--md-primary); border-radius: 3px; transition: width .2s; }
+  .progress-label { font-size: .75rem; color: var(--md-on-surface-variant); width: 32px; text-align: right; }
 
   /* ── Actions ── */
   .actions { display: flex; gap: 10px; margin-top: 4px; }

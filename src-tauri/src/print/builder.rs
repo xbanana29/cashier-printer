@@ -139,6 +139,18 @@ fn format_item_line(item: &str, total_width: usize) -> Vec<String> {
     out
 }
 
+/// Word-wrap a single item without dot-leaders or checkbox. Used for tanda terima
+/// content lines where free-text entries don't need a check-off box.
+fn format_plain_line(item: &str, width: usize) -> Vec<String> {
+    if item.is_empty() {
+        return vec![String::new()];
+    }
+    textwrap::wrap(item, width)
+        .into_iter()
+        .map(|s| s.into_owned())
+        .collect()
+}
+
 /// Build the receipt as a list of plain-text lines (no ESC/POS control bytes).
 /// Used both by `build_receipt` (which then feeds the lines to the ESC/POS
 /// printer) and by `build_receipt_preview` (plain text for on-screen display).
@@ -157,7 +169,7 @@ pub fn build_receipt_lines(order: &Order, settings: &AppSettings) -> Vec<String>
         lines.push(String::new()); // blank before items
 
         for item in order.content.lines() {
-            for line in format_item_line(item, eff_width) {
+            for line in format_plain_line(item, eff_width) {
                 lines.push(line);
             }
         }
@@ -255,7 +267,7 @@ pub fn build_receipt(order: &Order, settings: &AppSettings) -> Vec<u8> {
                 // ── Content items ─────────────────────────────────────────────
                 printer.custom(&[0x1D, 0x21, font_byte])?;
                 for item in order.content.lines() {
-                    for line in format_item_line(item, eff_width) {
+                    for line in format_plain_line(item, eff_width) {
                         printer.writeln(&line)?;
                     }
                 }
