@@ -1,6 +1,6 @@
 # Print Paste Order (PPO)
 
-Aplikasi desktop ringan untuk kasir toko kecil — input pesanan, cetak struk termal, simpan riwayat.  
+Aplikasi desktop ringan untuk kasir toko kecil — input pesanan, cetak struk termal, simpan riwayat, dan sinkron otomatis antar kasir dalam satu jaringan.  
 Dibuat dengan **Tauri 2 · Svelte 5 · Rust · SQLite** — berjalan 100% offline, tanpa server, tanpa internet.
 
 ---
@@ -42,9 +42,12 @@ chmod +x Print.Paste.Order_*.AppImage
 |---|---|
 | Pesanan baru | Input nama pelanggan + isi pesanan, cetak dengan satu klik atau Ctrl+Enter |
 | Riwayat pesanan | Cari, lihat preview, edit, cetak ulang, hapus — paginasi 25 per halaman |
+| Preview 1:1 | Preview struk di layar cocok persis dengan hasil cetak (font & layout sama) |
 | Edit pesanan | Ubah nama atau isi, simpan saja atau simpan & cetak ulang |
-| Pengaturan | Pilih printer, ukuran kertas, nama toko, footer, nama kasir, auto-cut |
+| Ukuran font isi | 4 ukuran fisik ESC/POS: Normal · Tinggi · Lebar · Besar |
+| Pengaturan printer | Selector tipe koneksi (USB/CUPS · Serial/COM · Jaringan) — hanya tampilkan field yang relevan |
 | Test print | Cetak halaman uji coba langsung dari menu pengaturan |
+| Sinkron LAN | Auto-discover & sinkron pesanan antar PC dalam satu WiFi/LAN — tanpa konfigurasi |
 | Retensi data | Riwayat disimpan selama 1 tahun, dihapus otomatis saat aplikasi dibuka |
 
 ---
@@ -60,35 +63,49 @@ chmod +x Print.Paste.Order_*.AppImage
 
 ### Konfigurasi Koneksi
 
-Isi kolom **Printer Default** di halaman Pengaturan sesuai jenis koneksi:
+Buka halaman **Pengaturan → Printer**, pilih jenis koneksi:
 
-| Jenis | Contoh nilai |
-|---|---|
-| USB via CUPS (macOS/Linux) | `EPSON_TM-T82X` *(nama dari daftar printer)* |
-| USB via WinSpool (Windows) | `EPSON TM-T82X` *(nama dari daftar printer)* |
-| Serial / COM (Windows) | `COM3` |
-| Serial / tty (macOS/Linux) | `/dev/tty.usbserial-1234` |
-| Jaringan (LAN) | `192.168.1.100:9100` |
+| Tipe | Field yang muncul | Contoh |
+|---|---|---|
+| USB / CUPS | Dropdown daftar printer dari OS | `EPSON TM-T82X` |
+| Serial / COM | Dropdown port serial + pilihan baud rate | `/dev/tty.usbserial-1234` · `COM3` |
+| Jaringan (LAN) | Input alamat IP:port | `192.168.1.100:9100` |
 
 > **TM-U220 tanpa cutter** — matikan toggle **Auto-cut** di Pengaturan.
 
 ---
 
-## Tampilan
+## Sinkron LAN
+
+Semua PC yang menjalankan PPO dalam satu jaringan WiFi/LAN akan saling menemukan dan menyinkronkan pesanan secara otomatis — tanpa pengaturan IP, tanpa server pusat.
+
+- Perangkat yang terdeteksi muncul di **Pengaturan → Sinkronisasi LAN**
+- Sinkron berjalan di latar belakang setiap 30 detik
+- Tombol **Sync Sekarang** untuk sinkron manual
+- Deduplication via UUID — pesanan yang sama tidak disalin dua kali
+
+---
+
+## Tampilan Struk
 
 ```
-  DK PASAR                     ← nama pelanggan (cetak tebal, tinggi 2×)
-  Tanggal  : 2026-04-24 10:32
-
+================================
+          TOKO MAKMUR JAYA
+================================
+  DK PASAR                      ← nama pelanggan (tebal, 2× tinggi)
+  Tanggal  : 24/04/26 10:32
+--------------------------------
 2 sak beras........................ [ ]
 1 sak terigu....................... [ ]
-40 kg minyak goreng kemasan besar
-ekonomis........................... [ ]
+40 kg minyak goreng kemasan
+besar ekonomis..................... [ ]
 5 karton teh botol sosro........... [ ]
-
-          Terima kasih
-     CV REJEKI AMERTA JAYA
+--------------------------------
+    Terima kasih atas pesanan Anda!
+       TOKO MAKMUR JAYA
 PC: Kasir 1
+================================
+[CUT]
 ```
 
 - Titik-titik (dot leaders) memudahkan pencoretan manual
@@ -104,16 +121,26 @@ PC: Kasir 1
 | Pilihan | Lebar cetak | Printer |
 |---|---|---|
 | 58 mm | 32 karakter | RPP02 |
-| 75 mm | 42 karakter | EPSON TM-U220 |
+| 75 mm | 40 karakter | EPSON TM-U220 |
 | 80 mm | 48 karakter | EPSON TM-T82X *(default)* |
+
+### Ukuran Font Isi Pesanan
+
+| Pilihan | Keterangan |
+|---|---|
+| Normal | 1× tinggi, 1× lebar — standar |
+| Tinggi | 2× tinggi, 1× lebar |
+| Lebar | 1× tinggi, 2× lebar — kolom teks jadi separuh |
+| Besar | 2× tinggi, 2× lebar — kolom teks jadi separuh |
 
 ### Template Cetak
 
 | Field | Keterangan |
 |---|---|
-| Nama Toko | Muncul di bawah daftar item, teks terpusat |
-| Footer | Baris tepat di atas nama toko (misal: "Terima kasih atas pesanan Anda!") |
+| Nama Toko | Muncul di header dan footer struk, teks terpusat |
+| Footer | Baris pesan di atas nama toko (misal: "Terima kasih atas pesanan Anda!") |
 | Nama PC / Kasir | Muncul di baris paling bawah struk dan di kolom riwayat |
+| Baris Kosong Setelah Cetak | Tambah 1–5 baris jika tulisan terakhir tidak keluar dari kepala cetak |
 
 ---
 
@@ -151,8 +178,6 @@ cd src-tauri
 cargo test
 ```
 
-49 unit test mencakup: CRUD database, pengaturan, builder ESC/POS, dan dispatch printer.
-
 ---
 
 ## Struktur Proyek
@@ -163,23 +188,28 @@ cashier-printer/
 │   ├── lib/
 │   │   ├── api.ts               # Wrapper typed untuk invoke() Tauri
 │   │   ├── stores.svelte.ts     # Toast & state global (Svelte 5 runes)
-│   │   ├── types.ts             # Order, AppSettings, PrinterInfo
+│   │   ├── types.ts             # Order, AppSettings, PrinterInfo, PeerInfo
 │   │   └── GuidedTextarea.svelte # Textarea dengan garis batas kolom
 │   └── routes/
 │       ├── +layout.svelte       # Navigation Rail MD3 + toast overlay
 │       ├── new/                 # Form pesanan baru
-│       ├── history/             # Riwayat + search + pagination
+│       ├── history/             # Riwayat + search + pagination + preview
 │       ├── edit/[id]/           # Edit pesanan
-│       └── settings/            # Pengaturan printer & template
+│       └── settings/            # Pengaturan printer, template & LAN sync
 └── src-tauri/src/
     ├── db/
-    │   ├── mod.rs               # Inisialisasi SQLite + schema
-    │   ├── orders.rs            # CRUD pesanan
-    │   └── settings.rs          # Key-value settings
+    │   ├── mod.rs               # Inisialisasi SQLite + schema + migrasi
+    │   ├── orders.rs            # CRUD pesanan + sync order
+    │   └── settings.rs          # Key-value settings + device ID
     ├── print/
     │   ├── builder.rs           # VecDriver + layout struk ESC/POS
     │   └── driver.rs            # Dispatch: CUPS → Serial → Jaringan
-    ├── commands/                # Tauri commands (order, print, settings)
+    ├── sync/
+    │   ├── mod.rs               # Orkestrasi LAN sync
+    │   ├── discover.rs          # UDP broadcast peer discovery
+    │   ├── server.rs            # HTTP server (GET /sync, POST /push)
+    │   └── client.rs            # HTTP client sinkron dari peer
+    ├── commands/                # Tauri commands (order, print, settings, sync)
     ├── error.rs                 # AppError dengan serde + thiserror
     └── lib.rs                   # Tauri builder + state init
 ```

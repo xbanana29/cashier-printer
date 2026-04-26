@@ -8,6 +8,16 @@ pub async fn list_printers() -> Result<Vec<PrinterInfo>, AppError> {
 }
 
 #[tauri::command]
+pub async fn list_serial_ports() -> Result<Vec<String>, AppError> {
+    let ports = serialport::available_ports()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|p| p.port_name)
+        .collect();
+    Ok(ports)
+}
+
+#[tauri::command]
 pub async fn print_order(
     state: tauri::State<'_, DbConn>,
     order_id: i64,

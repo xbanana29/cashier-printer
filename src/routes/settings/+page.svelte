@@ -6,6 +6,7 @@
   import { check } from '@tauri-apps/plugin-updater';
   import { relaunch } from '@tauri-apps/plugin-process';
   import { getVersion } from '@tauri-apps/api/app';
+  import type { PeerInfo } from '$lib/types';
 
   type UpdateStatus = 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'error';
 
@@ -29,33 +30,95 @@
   });
 
   let printers: PrinterInfo[] = $state([]);
+  let serialPorts: string[] = $state([]);
   let loadingPrinters = $state(false);
   let saving = $state(false);
   let testing = $state(false);
+
+  type ConnType = 'os' | 'serial' | 'network';
+
+  // Derive connection type from stored printer value
+  function detectConnType(val: string): ConnType {
+    if (/^(\/dev\/tty|\/dev\/cu\.|COM\d)/i.test(val)) return 'serial';
+    if (/^\d{1,3}(\.\d{1,3}){3}(:\d+)?$/.test(val)) return 'network';
+    return 'os';
+  }
+
+  let connType: ConnType = $state('os');
+
+  // LAN sync
+  let peers: PeerInfo[] = $state([]);
+  let syncing = $state(false);
+  let deviceId = $state('');
 
   onMount(async () => {
     currentVersion = await getVersion().catch(() => '—');
     await loadSettings();
     await loadPrinters();
+    await refreshPeers();
+    // Poll peers every 5s while settings page is open
+    const peerTimer = setInterval(refreshPeers, 5000);
+    return () => clearInterval(peerTimer);
   });
 
   async function loadSettings() {
     try {
       settings = await api.getSettings();
+      connType = detectConnType(settings.default_printer);
     } catch (err) {
       showError(err);
     }
   }
 
+  async function refreshPeers() {
+    try {
+      peers = await api.getPeers();
+    } catch { /* ignore — sync may not be ready yet */ }
+    // Grab device_id from settings DB via a simple getSettings call (reuse existing data)
+    if (!deviceId && settings.pc_name) {
+      deviceId = settings.pc_name; // fallback display until we expose device_id
+    }
+  }
+
+  async function syncNow() {
+    syncing = true;
+    try {
+      const count = await api.syncNow();
+      showToast(count > 0 ? `${count} pesanan berhasil disinkron` : 'Tidak ada pesanan baru');
+      await refreshPeers();
+    } catch (err) {
+      showError(err);
+    } finally {
+      syncing = false;
+    }
+  }
+
+  function formatLastSeen(ts: number): string {
+    if (!ts) return '—';
+    const diff = Math.floor(Date.now() / 1000) - ts;
+    if (diff < 60) return `${diff}d lalu`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m lalu`;
+    return `${Math.floor(diff / 3600)}j lalu`;
+  }
+
   async function loadPrinters() {
     loadingPrinters = true;
     try {
-      printers = await api.listPrinters();
+      [printers, serialPorts] = await Promise.all([
+        api.listPrinters(),
+        api.listSerialPorts(),
+      ]);
     } catch (err) {
       showError(err);
     } finally {
       loadingPrinters = false;
     }
+  }
+
+  function switchConnType(type: ConnType) {
+    connType = type;
+    // Reset default_printer when switching type to avoid stale values
+    settings.default_printer = '';
   }
 
   async function save() {
@@ -138,30 +201,103 @@
         <span class="section-title">Printer</span>
       </div>
 
+      <!-- Connection type selector -->
       <div class="field">
-        <label for="printer" class="field-label">Printer Default</label>
-        <div class="row-gap">
-          <select id="printer" class="field-select" bind:value={settings.default_printer} disabled={loadingPrinters}>
-            <option value="">— Pilih printer —</option>
-            {#each printers as p}
-              <option value={p.name}>{p.name}{p.is_default ? ' (default sistem)' : ''}</option>
-            {/each}
-          </select>
-          <button type="button" class="icon-btn" onclick={loadPrinters} title="Refresh daftar printer" disabled={loadingPrinters}>
-            <span class="material-symbols-outlined">{loadingPrinters ? 'hourglass_empty' : 'refresh'}</span>
+        <span class="field-label">Jenis Koneksi</span>
+        <div class="conn-tabs">
+          <button
+            type="button"
+            class="conn-tab"
+            class:conn-tab-active={connType === 'os'}
+            onclick={() => switchConnType('os')}
+          >
+            <span class="material-symbols-outlined">usb</span>
+            USB / CUPS
+          </button>
+          <button
+            type="button"
+            class="conn-tab"
+            class:conn-tab-active={connType === 'serial'}
+            onclick={() => switchConnType('serial')}
+          >
+            <span class="material-symbols-outlined">cable</span>
+            Serial / COM
+          </button>
+          <button
+            type="button"
+            class="conn-tab"
+            class:conn-tab-active={connType === 'network'}
+            onclick={() => switchConnType('network')}
+          >
+            <span class="material-symbols-outlined">wifi</span>
+            Jaringan (LAN)
           </button>
         </div>
-        <p class="field-support">
-          Ketik manual: serial <code>/dev/tty.usbserial-1234</code> atau jaringan <code>192.168.1.100:9100</code>
-        </p>
-        <input
-          class="field-input"
-          type="text"
-          placeholder="Atau ketik nama / alamat manual..."
-          bind:value={settings.default_printer}
-        />
       </div>
 
+      <!-- OS/USB -->
+      {#if connType === 'os'}
+        <div class="field">
+          <label for="printer" class="field-label">Pilih Printer</label>
+          <div class="row-gap">
+            <select id="printer" class="field-select" bind:value={settings.default_printer} disabled={loadingPrinters}>
+              <option value="">— Pilih printer —</option>
+              {#each printers as p}
+                <option value={p.name}>{p.name}{p.is_default ? ' ✓' : ''}</option>
+              {/each}
+            </select>
+            <button type="button" class="icon-btn" onclick={loadPrinters} title="Refresh" disabled={loadingPrinters}>
+              <span class="material-symbols-outlined">{loadingPrinters ? 'hourglass_empty' : 'refresh'}</span>
+            </button>
+          </div>
+          <p class="field-support">Printer yang terdeteksi di sistem (USB, Bluetooth, jaringan via CUPS).</p>
+        </div>
+
+      <!-- Serial/COM -->
+      {:else if connType === 'serial'}
+        <div class="field">
+          <label for="serial-port" class="field-label">Port Serial</label>
+          <div class="row-gap">
+            <select id="serial-port" class="field-select" bind:value={settings.default_printer} disabled={loadingPrinters}>
+              <option value="">— Pilih port —</option>
+              {#each serialPorts as port}
+                <option value={port}>{port}</option>
+              {/each}
+            </select>
+            <button type="button" class="icon-btn" onclick={loadPrinters} title="Refresh" disabled={loadingPrinters}>
+              <span class="material-symbols-outlined">{loadingPrinters ? 'hourglass_empty' : 'refresh'}</span>
+            </button>
+          </div>
+          <p class="field-support">
+            Hubungkan printer via kabel USB serial / RS-232. Pastikan kabel terpasang sebelum refresh.
+          </p>
+        </div>
+        <div class="field">
+          <label for="baud" class="field-label">Kecepatan (Baud Rate)</label>
+          <select id="baud" class="field-select field-select-short" bind:value={settings.serial_baud_rate}>
+            <option value={9600}>9600 — RPP02</option>
+            <option value={19200}>19200 — EPSON TM-U220</option>
+            <option value={38400}>38400</option>
+            <option value={115200}>115200</option>
+          </select>
+        </div>
+
+      <!-- Network/LAN -->
+      {:else}
+        <div class="field">
+          <label for="net-addr" class="field-label">Alamat IP Printer</label>
+          <input
+            id="net-addr"
+            class="field-input"
+            type="text"
+            placeholder="Contoh: 192.168.1.100:9100"
+            bind:value={settings.default_printer}
+          />
+          <p class="field-support">Format: <code>IP:port</code>. Port default printer jaringan biasanya <code>9100</code>.</p>
+        </div>
+      {/if}
+
+      <!-- Paper size — always visible -->
       <div class="field">
         <span class="field-label">Ukuran Kertas</span>
         <div class="chip-group">
@@ -174,20 +310,7 @@
         </div>
       </div>
 
-      <div class="field">
-        <label for="baud" class="field-label">
-          Baud Rate Serial
-          <span class="label-optional">— hanya untuk koneksi COM/serial</span>
-        </label>
-        <select id="baud" class="field-select" bind:value={settings.serial_baud_rate}>
-          <option value={9600}>9600 — RPP02 default</option>
-          <option value={19200}>19200 — EPSON TM-U220 serial</option>
-          <option value={38400}>38400</option>
-          <option value={115200}>115200</option>
-        </select>
-        <p class="field-support">Tidak berpengaruh jika printer terhubung via USB/CUPS atau jaringan.</p>
-      </div>
-
+      <!-- Auto-cut -->
       <div class="field">
         <label class="switch-label">
           <div class="switch" class:switch-on={settings.auto_cut}>
@@ -195,31 +318,24 @@
             <span class="switch-thumb"></span>
           </div>
           <div class="switch-text">
-            <span class="switch-name">Pemotong kertas otomatis (auto-cut)</span>
-            <span class="switch-desc">
-              Nonaktifkan untuk TM-U220 <strong>tanpa</strong> cutter. TM-U220 dengan cutter &amp; TM-T82X: aktifkan.
-            </span>
+            <span class="switch-name">Potong kertas otomatis</span>
+            <span class="switch-desc">Matikan untuk TM-U220 tanpa cutter.</span>
           </div>
         </label>
       </div>
 
+      <!-- Extra feeds -->
       <div class="field">
-        <label for="extra-feeds" class="field-label">
-          Baris Tambahan Setelah Cetak
-          <span class="label-optional">— untuk mendorong kertas keluar</span>
-        </label>
+        <label for="extra-feeds" class="field-label">Baris Kosong Setelah Cetak</label>
         <select id="extra-feeds" class="field-select field-select-short" bind:value={settings.extra_feeds}>
-          <option value={0}>0 — tidak ada tambahan</option>
-          <option value={1}>1 baris</option>
-          <option value={2}>2 baris</option>
-          <option value={3}>3 baris</option>
-          <option value={4}>4 baris</option>
-          <option value={5}>5 baris</option>
+          <option value={0}>0</option>
+          <option value={1}>1</option>
+          <option value={2}>2</option>
+          <option value={3}>3</option>
+          <option value={4}>4</option>
+          <option value={5}>5</option>
         </select>
-        <p class="field-support">
-          Tambahkan baris kosong agar tulisan terakhir keluar dari kepala cetak.
-          Berguna untuk TM-U220 dan printer non-standar yang tidak otomatis mengeluarkan kertas.
-        </p>
+        <p class="field-support">Tambah jika tulisan terakhir tidak keluar dari kepala cetak.</p>
       </div>
     </div>
 
@@ -234,20 +350,21 @@
         <span class="field-label">Ukuran Font Isi Pesanan</span>
         <div class="chip-group">
           {#each [
-            { value: 'normal', label: 'Normal',    desc: '1×' },
-            { value: 'tall',   label: 'Tinggi 2×', desc: 'tinggi' },
-            { value: 'wide',   label: 'Lebar 2×',  desc: 'lebar' },
-            { value: 'large',  label: 'Besar 2×2', desc: 'lebar+tinggi' },
+            { value: 'normal', label: 'Normal',      sub: '1× — standar' },
+            { value: 'tall',   label: 'Tinggi',      sub: '2× tinggi' },
+            { value: 'wide',   label: 'Lebar',       sub: '2× lebar, ½ kolom' },
+            { value: 'large',  label: 'Besar',       sub: '2× tinggi + lebar' },
           ] as opt}
-            <label class="chip" class:chip-selected={settings.content_font_size === opt.value} title={opt.desc}>
+            <label class="chip font-chip" class:chip-selected={settings.content_font_size === opt.value}>
               <input type="radio" bind:group={settings.content_font_size} value={opt.value} />
-              {opt.label}
+              <span class="chip-label">{opt.label}</span>
+              <span class="chip-sub">{opt.sub}</span>
             </label>
           {/each}
         </div>
         <p class="field-support">
-          Mengatur ukuran font baris item pesanan. Garis putus-putus menyesuaikan otomatis.<br>
-          <strong>Lebar 2×</strong> / <strong>Besar 2×2</strong>: lebar karakter ganda — kolom teks berkurang separuh.
+          Printer ESC/POS raw hanya mendukung 4 ukuran fisik ini.
+          <strong>Lebar</strong> dan <strong>Besar</strong> mengurangi kolom teks separuh — baris item lebih sedikit per baris.
         </p>
       </div>
 
@@ -319,6 +436,50 @@
             {updateStatus === 'checking' ? 'hourglass_empty' : 'sync'}
           </span>
           {updateStatus === 'checking' ? 'Mengecek...' : 'Cek Update'}
+        </button>
+      </div>
+    </div>
+
+    <!-- ── Sinkronisasi LAN ──────────────────────── -->
+    <div class="section">
+      <div class="section-header">
+        <span class="material-symbols-outlined section-icon">lan</span>
+        <span class="section-title">Sinkronisasi LAN</span>
+      </div>
+
+      <p class="field-support" style="margin-bottom: 12px">
+        Sinkron otomatis antar PC dalam satu jaringan WiFi/LAN. Tidak perlu internet.
+      </p>
+
+      <div class="field">
+        <span class="field-label">Perangkat Terhubung</span>
+        {#if peers.length === 0}
+          <p class="peer-empty">Belum ada perangkat lain terdeteksi di jaringan ini.</p>
+        {:else}
+          <div class="peer-list">
+            {#each peers as peer (peer.device_id)}
+              <div class="peer-row">
+                <span class="material-symbols-outlined peer-icon">computer</span>
+                <div class="peer-info">
+                  <span class="peer-name">{peer.pc_name || 'Tanpa nama'}</span>
+                  <span class="peer-addr">{peer.addr}</span>
+                </div>
+                <div class="peer-meta">
+                  {#if peer.orders_synced > 0}
+                    <span class="peer-badge">{peer.orders_synced} order</span>
+                  {/if}
+                  <span class="peer-seen">{formatLastSeen(peer.last_seen)}</span>
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+
+      <div class="field" style="margin-bottom: 0">
+        <button type="button" class="btn-outlined" onclick={syncNow} disabled={syncing}>
+          <span class="material-symbols-outlined">{syncing ? 'hourglass_empty' : 'sync'}</span>
+          {syncing ? 'Menyinkron...' : 'Sync Sekarang'}
         </button>
       </div>
     </div>
@@ -411,6 +572,31 @@
 
   .row-gap { display: flex; gap: 8px; }
   .row-gap .field-select { flex: 1; }
+
+  /* ── Connection type tabs ── */
+  .conn-tabs {
+    display: flex; gap: 0;
+    border: 1px solid var(--md-outline-variant);
+    border-radius: 8px; overflow: hidden;
+  }
+
+  .conn-tab {
+    flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
+    height: 44px; padding: 0 12px;
+    background: #fff; color: var(--md-on-surface-variant);
+    border: none; border-right: 1px solid var(--md-outline-variant);
+    font-size: .8125rem; font-weight: 500; font-family: 'Roboto', sans-serif;
+    cursor: pointer; transition: background .15s, color .15s;
+  }
+  .conn-tab:last-child { border-right: none; }
+  .conn-tab .material-symbols-outlined { font-size: 18px; }
+  .conn-tab:hover:not(.conn-tab-active) { background: var(--md-surface-variant); }
+
+  .conn-tab-active {
+    background: var(--md-primary-container);
+    color: var(--md-primary);
+    font-weight: 600;
+  }
 
   /* ── Icon button ── */
   .icon-btn {
@@ -528,6 +714,45 @@
   .progress-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--md-outline-variant); overflow: hidden; }
   .progress-fill { height: 100%; background: var(--md-primary); border-radius: 3px; transition: width .2s; }
   .progress-label { font-size: .75rem; color: var(--md-on-surface-variant); width: 32px; text-align: right; }
+
+  /* ── Font chip sub-label ── */
+  .font-chip { flex-direction: column; height: auto; padding: 6px 14px; gap: 2px; align-items: center; }
+  .chip-label { font-size: .875rem; font-weight: 500; }
+  .chip-sub   { font-size: .65rem; color: var(--md-on-surface-variant); font-weight: 400; }
+  .font-chip.chip-selected .chip-sub { color: var(--md-primary); opacity: .85; }
+
+  /* ── LAN Sync peers ── */
+  .peer-empty {
+    font-size: .8125rem;
+    color: var(--md-on-surface-variant);
+    font-style: italic;
+    padding: 4px 0;
+  }
+
+  .peer-list { display: flex; flex-direction: column; gap: 6px; }
+
+  .peer-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: var(--md-surface-container);
+    border-radius: 8px;
+  }
+
+  .peer-icon { font-size: 20px; color: var(--md-secondary); flex-shrink: 0; }
+
+  .peer-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .peer-name { font-size: .875rem; font-weight: 500; color: var(--md-on-surface); }
+  .peer-addr { font-size: .72rem; color: var(--md-on-surface-variant); font-family: monospace; }
+
+  .peer-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex-shrink: 0; }
+  .peer-badge {
+    font-size: .68rem; font-weight: 600;
+    color: var(--md-on-primary); background: var(--md-primary);
+    border-radius: 4px; padding: 1px 6px;
+  }
+  .peer-seen { font-size: .68rem; color: var(--md-on-surface-variant); }
 
   /* ── Actions ── */
   .actions { display: flex; gap: 10px; margin-top: 4px; }

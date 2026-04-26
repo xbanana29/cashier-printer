@@ -1,5 +1,18 @@
 use rusqlite::{Connection, Result, params};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+fn de_string_or_number<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::Error;
+    let v = serde_json::Value::deserialize(deserializer)?;
+    match v {
+        serde_json::Value::String(s) => Ok(s),
+        serde_json::Value::Number(n) => Ok(n.to_string()),
+        other => Err(D::Error::custom(format!("expected string or number, got {other}"))),
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettings {
@@ -17,7 +30,8 @@ pub struct AppSettings {
     /// and shown in the order history list. Auto-populated from system hostname.
     pub pc_name: String,
     /// ESC/POS character size for the order content (item list) lines.
-    /// "normal" = 1×1 · "tall" = 1×2 (double-height) · "wide" = 2×1 (double-width) · "large" = 2×2
+    /// Accepts numeric pt values (8–24) or legacy keywords "normal"/"tall"/"wide"/"large".
+    #[serde(deserialize_with = "de_string_or_number")]
     pub content_font_size: String,
     /// Extra blank lines fed after the receipt (0–5).
     /// Advances paper so the last printed line clears the print-head area on printers
@@ -65,6 +79,18 @@ pub fn get_all_settings(conn: &Connection) -> Result<AppSettings> {
             .map(|n| n.min(5))
             .unwrap_or(0),
     })
+}
+
+/// Get the stored device UUID, generating and persisting one if it doesn't exist yet.
+pub fn get_or_create_device_id(conn: &Connection) -> String {
+    if let Ok(id) = get_setting(conn, "device_id") {
+        if !id.is_empty() {
+            return id;
+        }
+    }
+    let new_id = uuid::Uuid::new_v4().to_string();
+    let _ = set_setting(conn, "device_id", &new_id);
+    new_id
 }
 
 pub fn save_all_settings(conn: &Connection, settings: &AppSettings) -> Result<()> {

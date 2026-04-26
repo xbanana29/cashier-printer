@@ -29,6 +29,14 @@ export interface PrinterInfo {
   connection_type: string;
 }
 
+export interface PeerInfo {
+  device_id: string;
+  pc_name: string;
+  addr: string;
+  last_seen: number;
+  orders_synced: number;
+}
+
 export interface AppError {
   type: 'Database' | 'Print' | 'PrinterNotFound' | 'Settings' | 'NotFound';
   message: string;

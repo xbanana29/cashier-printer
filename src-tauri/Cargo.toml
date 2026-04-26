@@ -37,6 +37,11 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 textwrap = "0.16"
 
+# LAN sync
+tiny_http = "0.12"
+uuid = { version = "1", features = ["v4"] }
+ureq = { version = "2", default-features = false, features = ["json"] }
+
 [profile.release]
 codegen-units = 1
 lto = true

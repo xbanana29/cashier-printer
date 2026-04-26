@@ -2,6 +2,7 @@ pub mod commands;
 pub mod db;
 pub mod error;
 pub mod print;
+pub mod sync;
 
 use tauri::Manager;
 
@@ -32,15 +33,23 @@ pub fn run() {
             let conn = db::init(&app_data_dir).expect("failed to initialize database");
 
             // Auto-populate pc_name with the system hostname on first run
-            {
+            let (device_id, pc_name_val) = {
                 let c = conn.lock().expect("db lock poisoned");
-                let current = db::settings::get_setting(&c, "pc_name").unwrap_or_default();
-                if current.is_empty() {
+                let current_pc = db::settings::get_setting(&c, "pc_name").unwrap_or_default();
+                if current_pc.is_empty() {
                     let _ = db::settings::set_setting(&c, "pc_name", &get_hostname());
                 }
-            }
+                let pc = db::settings::get_setting(&c, "pc_name")
+                    .unwrap_or_else(|_| "PC".to_string());
+                let did = db::settings::get_or_create_device_id(&c);
+                (did, pc)
+            };
+
+            // Start LAN sync in background
+            let peers = sync::start(conn.clone(), device_id, pc_name_val);
 
             app.manage(conn);
+            app.manage(peers);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -51,12 +60,15 @@ pub fn run() {
             commands::order_cmds::delete_order,
             commands::order_cmds::purge_old_orders,
             commands::print_cmds::list_printers,
+            commands::print_cmds::list_serial_ports,
             commands::print_cmds::print_order,
             commands::print_cmds::reprint_order,
             commands::print_cmds::preview_receipt,
             commands::print_cmds::test_print,
             commands::settings_cmds::get_settings,
             commands::settings_cmds::save_settings,
+            commands::sync_cmds::get_peers,
+            commands::sync_cmds::sync_now,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

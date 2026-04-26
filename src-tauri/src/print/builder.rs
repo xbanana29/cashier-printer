@@ -66,26 +66,46 @@ fn char_width(paper_size: &str) -> usize {
 }
 
 /// Effective characters per line for item text, accounting for font width scaling.
-/// Double-width fonts ("wide", "large") take 2 hardware columns per character,
-/// so the wrap budget is halved.
+/// Double-width fonts take 2 hardware columns per character, so the wrap budget is halved.
 fn effective_width(paper_size: &str, font_size: &str) -> usize {
     let base = char_width(paper_size);
+    if is_double_wide(font_size) { base / 2 } else { base }
+}
+
+/// Returns true when the font size maps to a double-width ESC/POS mode.
+fn is_double_wide(font_size: &str) -> bool {
     match font_size {
-        "wide" | "large" => base / 2,
-        _ => base, // "normal", "tall", or any unknown value
+        "wide" | "large" => true,
+        _ => font_size.parse::<u32>().unwrap_or(11) >= 18,
+    }
+}
+
+#[allow(dead_code)]
+/// Returns true when the font size maps to a double-height ESC/POS mode (tall or large).
+fn is_double_tall(font_size: &str) -> bool {
+    match font_size {
+        "tall" | "large" => true,
+        _ => matches!(font_size.parse::<u32>().unwrap_or(11), 14..=17 | 22..),
     }
 }
 
 /// ESC/POS GS ! byte that encodes the requested content font size.
-/// Bit layout: bits 2:0 = width multiplier−1, bits 6:4 = height multiplier−1.
-///   0x00 = normal (1×1)   0x10 = tall (1×2)
-///   0x01 = wide (2×1)     0x11 = large (2×2)
+/// Supports both legacy keywords ("normal","tall","wide","large") and numeric pt values (8–24).
+///
+/// Numeric mapping:  ≤13 → normal (1×1) · 14–17 → tall (1×2) · 18–21 → wide (2×1) · 22+ → large (2×2)
 fn content_font_byte(font_size: &str) -> u8 {
     match font_size {
-        "tall"  => 0x10,
-        "wide"  => 0x01,
-        "large" => 0x11,
-        _       => 0x00, // "normal" or unknown
+        "normal" => return 0x00,
+        "tall"   => return 0x10,
+        "wide"   => return 0x01,
+        "large"  => return 0x11,
+        _ => {}
+    }
+    match font_size.parse::<u32>().unwrap_or(11) {
+        0..=13  => 0x00,
+        14..=17 => 0x10,
+        18..=21 => 0x01,
+        _       => 0x11,
     }
 }
 
@@ -170,7 +190,7 @@ pub fn build_receipt_lines(order: &Order, settings: &AppSettings) -> Vec<String>
 
         for item in order.content.lines() {
             for line in format_plain_line(item, eff_width) {
-                lines.push(line);
+                lines.push(format!("\x01{}", line));
             }
         }
 
@@ -199,7 +219,7 @@ pub fn build_receipt_lines(order: &Order, settings: &AppSettings) -> Vec<String>
 
         for item in order.content.lines() {
             for line in format_item_line(item, eff_width) {
-                lines.push(line);
+                lines.push(format!("\x01{}", line));
             }
         }
 
@@ -448,11 +468,22 @@ mod tests {
 
     #[test]
     fn content_font_byte_values() {
+        // Legacy keywords
         assert_eq!(content_font_byte("normal"), 0x00);
         assert_eq!(content_font_byte("tall"),   0x10);
         assert_eq!(content_font_byte("wide"),   0x01);
         assert_eq!(content_font_byte("large"),  0x11);
         assert_eq!(content_font_byte(""),       0x00); // unknown → normal
+        // Numeric pt values
+        assert_eq!(content_font_byte("8"),  0x00); // normal
+        assert_eq!(content_font_byte("11"), 0x00); // normal
+        assert_eq!(content_font_byte("13"), 0x00); // normal (< 14)
+        assert_eq!(content_font_byte("14"), 0x10); // tall
+        assert_eq!(content_font_byte("17"), 0x10); // tall (< 18)
+        assert_eq!(content_font_byte("18"), 0x01); // wide
+        assert_eq!(content_font_byte("21"), 0x01); // wide (< 22)
+        assert_eq!(content_font_byte("22"), 0x11); // large
+        assert_eq!(content_font_byte("24"), 0x11); // large
     }
 
     // ── char_width ────────────────────────────────────────────────────────────
@@ -615,7 +646,10 @@ mod tests {
         settings.content_font_size = "wide".to_string();
         let lines = build_receipt_lines(&order, &settings);
         // At least one continuation line must exist (item wraps at 20 chars)
-        let has_wrap = lines.iter().any(|l| l.contains("[ ]") && l.len() <= 24);
+        let has_wrap = lines.iter().any(|l| {
+            let content = l.strip_prefix('\x01').unwrap_or(l.as_str());
+            content.contains("[ ]") && content.len() <= 24
+        });
         assert!(has_wrap, "wide font item line should be ≤24 chars with checkbox");
     }
 

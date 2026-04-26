@@ -2,8 +2,17 @@ use rusqlite::{Connection, Result, params};
 use serde::{Deserialize, Serialize};
 
 fn fmt_date(raw: &str) -> String {
-    // "2026-04-25 14:32:00" → "25/04/26"
-    if raw.len() >= 10 {
+    // "2026-04-25 14:32:00" → "25/04/26 14:32"
+    if raw.len() >= 16 {
+        format!(
+            "{}/{}/{} {}:{}",
+            &raw[8..10],
+            &raw[5..7],
+            &raw[2..4],
+            &raw[11..13],
+            &raw[14..16]
+        )
+    } else if raw.len() >= 10 {
         format!("{}/{}/{}", &raw[8..10], &raw[5..7], &raw[2..4])
     } else {
         raw.to_string()
@@ -19,17 +28,66 @@ pub struct Order {
     pub created_at: String,
 }
 
+/// Flat order struct used for LAN sync (raw ISO created_at, no formatting).
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SyncOrder {
+    pub sync_id: String,
+    pub customer_name: String,
+    pub content: String,
+    pub order_type: String,
+    pub created_at: String,
+}
+
 pub fn create_order(
     conn: &Connection,
     customer_name: &str,
     content: &str,
     order_type: &str,
 ) -> Result<i64> {
+    let sync_id = uuid::Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO orders (customer_name, content, order_type) VALUES (?1, ?2, ?3)",
-        params![customer_name, content, order_type],
+        "INSERT INTO orders (customer_name, content, order_type, sync_id) VALUES (?1, ?2, ?3, ?4)",
+        params![customer_name, content, order_type, sync_id],
     )?;
     Ok(conn.last_insert_rowid())
+}
+
+/// Return orders created within the last 30 days for sync (raw ISO dates).
+pub fn get_orders_for_sync(conn: &Connection) -> Result<Vec<SyncOrder>> {
+    let mut stmt = conn.prepare(
+        "SELECT sync_id, customer_name, content, order_type, created_at \
+         FROM orders \
+         WHERE sync_id IS NOT NULL \
+           AND created_at >= datetime('now', '-30 days') \
+         ORDER BY created_at DESC \
+         LIMIT 500",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(SyncOrder {
+            sync_id: row.get(0)?,
+            customer_name: row.get(1)?,
+            content: row.get(2)?,
+            order_type: row.get(3)?,
+            created_at: row.get(4)?,
+        })
+    })?;
+    rows.collect()
+}
+
+/// Insert a synced order from a remote peer. Returns true if the row was inserted (not a duplicate).
+pub fn insert_sync_order(conn: &Connection, order: &SyncOrder) -> Result<bool> {
+    let affected = conn.execute(
+        "INSERT OR IGNORE INTO orders (sync_id, customer_name, content, order_type, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            order.sync_id,
+            order.customer_name,
+            order.content,
+            order.order_type,
+            order.created_at
+        ],
+    )?;
+    Ok(affected > 0)
 }
 
 pub fn get_orders(conn: &Connection, order_type: &str) -> Result<Vec<Order>> {
@@ -111,7 +169,8 @@ mod tests {
                 customer_name TEXT NOT NULL,
                 content       TEXT NOT NULL,
                 order_type    TEXT NOT NULL DEFAULT 'order',
-                created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+                created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+                sync_id       TEXT
             );",
         )
         .unwrap();

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Order, AppSettings, PrinterInfo } from './types';
+import type { Order, AppSettings, PrinterInfo, PeerInfo } from './types';
 
 export const api = {
   // Orders
@@ -25,6 +25,9 @@ export const api = {
   listPrinters: (): Promise<PrinterInfo[]> =>
     invoke<PrinterInfo[]>('list_printers'),
 
+  listSerialPorts: (): Promise<string[]> =>
+    invoke<string[]>('list_serial_ports'),
+
   printOrder: (orderId: number): Promise<void> =>
     invoke<void>('print_order', { orderId }),
 
@@ -43,4 +46,11 @@ export const api = {
 
   saveSettings: (settings: AppSettings): Promise<void> =>
     invoke<void>('save_settings', { settings }),
+
+  // LAN Sync
+  getPeers: (): Promise<PeerInfo[]> =>
+    invoke<PeerInfo[]>('get_peers'),
+
+  syncNow: (): Promise<number> =>
+    invoke<number>('sync_now'),
 };

@@ -1,4 +1,4 @@
-use rusqlite::{Connection, Result};
+use rusqlite::{Connection, Result, params};
 use std::sync::{Arc, Mutex};
 
 pub mod orders;
@@ -31,15 +31,38 @@ const SCHEMA_SQL: &str = "
     INSERT OR IGNORE INTO settings (key, value) VALUES ('pc_name',            '');
     INSERT OR IGNORE INTO settings (key, value) VALUES ('content_font_size',  'normal');
     INSERT OR IGNORE INTO settings (key, value) VALUES ('extra_feeds',        '0');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('device_id',          '');
 ";
 
 pub fn init(app_data_dir: &std::path::Path) -> Result<DbConn> {
     let db_path = app_data_dir.join("orders.db");
     let conn = Connection::open(&db_path)?;
     conn.execute_batch(SCHEMA_SQL)?;
-    // Migration for existing DBs: no-op if column already exists
+
+    // Migration: add order_type if missing (no-op when already exists)
     let _ = conn.execute_batch(
         "ALTER TABLE orders ADD COLUMN order_type TEXT NOT NULL DEFAULT 'order';",
     );
+    // Migration: add sync_id if missing
+    let _ = conn.execute_batch(
+        "ALTER TABLE orders ADD COLUMN sync_id TEXT;",
+    );
+
+    // Generate sync_ids for existing orders that don't have one
+    let ids_without_sync_id: Vec<i64> = {
+        let mut stmt = conn.prepare("SELECT id FROM orders WHERE sync_id IS NULL")?;
+        let ids: Vec<i64> = stmt.query_map([], |r| r.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        ids
+    };
+    for id in ids_without_sync_id {
+        let sync_id = uuid::Uuid::new_v4().to_string();
+        let _ = conn.execute(
+            "UPDATE orders SET sync_id = ?1 WHERE id = ?2",
+            params![sync_id, id],
+        );
+    }
+
     Ok(Arc::new(Mutex::new(conn)))
 }

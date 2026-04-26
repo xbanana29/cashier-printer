@@ -34,17 +34,21 @@
   let previewLoading = $state(false);
 
   const previewHtml = $derived.by(() => {
-    const fs = (contentFontSize === 'wide' || contentFontSize === 'large') ? '1.56rem' : '0.78rem';
-    const lh = (contentFontSize === 'tall' || contentFontSize === 'large') ? '3.1' : '1.55';
+    const wide = contentFontSize === 'wide' || contentFontSize === 'large';
+    const tall = contentFontSize === 'tall' || contentFontSize === 'large';
+    const fs   = wide ? '1.56rem' : '0.78rem';
+    const lh   = tall ? '3.1' : '1.55';
 
     return previewText.split('\n').map((line, i) => {
-      const esc = line
+      const isItem = line.startsWith('\x01');
+      const raw = isItem ? line.slice(1) : line;
+      const esc = raw
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
       const safe = esc || '&nbsp;';
       if (i === 0) return `<div class="line preview-cname">${safe}</div>`;
-      if (esc.includes('[ ]'))
+      if (isItem)
         return `<div class="line preview-item" style="font-size:${fs};line-height:${lh}">${esc}</div>`;
       return `<div class="line">${safe}</div>`;
     }).join('');
@@ -121,15 +125,6 @@
     }
   }
 
-  function formatDate(dt: string): string {
-    try {
-      return new Date(dt.replace(' ', 'T')).toLocaleString('id-ID', {
-        day: '2-digit', month: 'short', year: 'numeric',
-        hour: '2-digit', minute: '2-digit',
-      });
-    } catch { return dt; }
-  }
-
   function contentPreview(content: string): string {
     const first = content.split('\n')[0];
     return first.length > 60 ? first.slice(0, 60) + '…' : first;
@@ -197,7 +192,7 @@
             <div class="card-name">{order.customer_name}</div>
             <div class="card-preview">{contentPreview(order.content)}</div>
             <div class="card-meta">
-              <span class="card-date">{formatDate(order.created_at)}</span>
+              <span class="card-date">{order.created_at}</span>
               {#if pcName}
                 <span class="card-pc">{pcName}</span>
               {/if}
