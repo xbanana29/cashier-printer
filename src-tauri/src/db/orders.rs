@@ -26,6 +26,8 @@ pub struct Order {
     pub content: String,
     pub order_type: String,
     pub created_at: String,
+    /// Workstation name that created this order (set from settings.pc_name at insert time).
+    pub pc_name: String,
 }
 
 /// Flat order struct used for LAN sync (raw ISO created_at, no formatting).
@@ -36,6 +38,7 @@ pub struct SyncOrder {
     pub content: String,
     pub order_type: String,
     pub created_at: String,
+    pub pc_name: String,
 }
 
 pub fn create_order(
@@ -43,11 +46,13 @@ pub fn create_order(
     customer_name: &str,
     content: &str,
     order_type: &str,
+    pc_name: &str,
 ) -> Result<i64> {
     let sync_id = uuid::Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO orders (customer_name, content, order_type, sync_id) VALUES (?1, ?2, ?3, ?4)",
-        params![customer_name, content, order_type, sync_id],
+        "INSERT INTO orders (customer_name, content, order_type, sync_id, pc_name) \
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![customer_name, content, order_type, sync_id, pc_name],
     )?;
     Ok(conn.last_insert_rowid())
 }
@@ -55,7 +60,7 @@ pub fn create_order(
 /// Return orders created within the last 30 days for sync (raw ISO dates).
 pub fn get_orders_for_sync(conn: &Connection) -> Result<Vec<SyncOrder>> {
     let mut stmt = conn.prepare(
-        "SELECT sync_id, customer_name, content, order_type, created_at \
+        "SELECT sync_id, customer_name, content, order_type, created_at, pc_name \
          FROM orders \
          WHERE sync_id IS NOT NULL \
            AND created_at >= datetime('now', '-30 days') \
@@ -69,22 +74,26 @@ pub fn get_orders_for_sync(conn: &Connection) -> Result<Vec<SyncOrder>> {
             content: row.get(2)?,
             order_type: row.get(3)?,
             created_at: row.get(4)?,
+            pc_name: row.get(5)?,
         })
     })?;
     rows.collect()
 }
 
 /// Insert a synced order from a remote peer. Returns true if the row was inserted (not a duplicate).
+/// INSERT OR IGNORE relies on the UNIQUE index on sync_id to skip rows already present.
 pub fn insert_sync_order(conn: &Connection, order: &SyncOrder) -> Result<bool> {
     let affected = conn.execute(
-        "INSERT OR IGNORE INTO orders (sync_id, customer_name, content, order_type, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT OR IGNORE INTO orders \
+         (sync_id, customer_name, content, order_type, created_at, pc_name) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             order.sync_id,
             order.customer_name,
             order.content,
             order.order_type,
-            order.created_at
+            order.created_at,
+            order.pc_name,
         ],
     )?;
     Ok(affected > 0)
@@ -92,7 +101,7 @@ pub fn insert_sync_order(conn: &Connection, order: &SyncOrder) -> Result<bool> {
 
 pub fn get_orders(conn: &Connection, order_type: &str) -> Result<Vec<Order>> {
     let mut stmt = conn.prepare(
-        "SELECT id, customer_name, content, order_type, created_at \
+        "SELECT id, customer_name, content, order_type, created_at, pc_name \
          FROM orders WHERE order_type = ?1 ORDER BY created_at DESC",
     )?;
     let rows = stmt.query_map([order_type], |row| {
@@ -102,6 +111,7 @@ pub fn get_orders(conn: &Connection, order_type: &str) -> Result<Vec<Order>> {
             content: row.get(2)?,
             order_type: row.get(3)?,
             created_at: fmt_date(&row.get::<_, String>(4)?),
+            pc_name: row.get(5)?,
         })
     })?;
     rows.collect()
@@ -109,7 +119,8 @@ pub fn get_orders(conn: &Connection, order_type: &str) -> Result<Vec<Order>> {
 
 pub fn get_order(conn: &Connection, id: i64) -> Result<Order> {
     conn.query_row(
-        "SELECT id, customer_name, content, order_type, created_at FROM orders WHERE id = ?1",
+        "SELECT id, customer_name, content, order_type, created_at, pc_name \
+         FROM orders WHERE id = ?1",
         params![id],
         |row| {
             Ok(Order {
@@ -118,6 +129,7 @@ pub fn get_order(conn: &Connection, id: i64) -> Result<Order> {
                 content: row.get(2)?,
                 order_type: row.get(3)?,
                 created_at: fmt_date(&row.get::<_, String>(4)?),
+                pc_name: row.get(5)?,
             })
         },
     )
@@ -170,7 +182,8 @@ mod tests {
                 content       TEXT NOT NULL,
                 order_type    TEXT NOT NULL DEFAULT 'order',
                 created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
-                sync_id       TEXT
+                sync_id       TEXT UNIQUE,
+                pc_name       TEXT NOT NULL DEFAULT ''
             );",
         )
         .unwrap();
@@ -180,7 +193,7 @@ mod tests {
     #[test]
     fn create_and_get_order() {
         let conn = setup();
-        let id = create_order(&conn, "Pak Budi", "2 sak beras", "order").unwrap();
+        let id = create_order(&conn, "Pak Budi", "2 sak beras", "order", "Kasir 1").unwrap();
         assert!(id > 0);
         let order = get_order(&conn, id).unwrap();
         assert_eq!(order.customer_name, "Pak Budi");
@@ -193,7 +206,7 @@ mod tests {
     #[test]
     fn create_and_get_receipt() {
         let conn = setup();
-        let id = create_order(&conn, "Toko Maju", "Jenis : Retur\nGudang : A", "receipt").unwrap();
+        let id = create_order(&conn, "Toko Maju", "Jenis : Retur\nGudang : A", "receipt", "Kasir 1").unwrap();
         let order = get_order(&conn, id).unwrap();
         assert_eq!(order.order_type, "receipt");
         assert_eq!(order.customer_name, "Toko Maju");
@@ -216,8 +229,8 @@ mod tests {
     #[test]
     fn get_orders_filters_by_type() {
         let conn = setup();
-        create_order(&conn, "Alpha", "item a", "order").unwrap();
-        create_order(&conn, "Beta", "item b", "receipt").unwrap();
+        create_order(&conn, "Alpha", "item a", "order", "Kasir 1").unwrap();
+        create_order(&conn, "Beta", "item b", "receipt", "Kasir 1").unwrap();
         let orders = get_orders(&conn, "order").unwrap();
         assert_eq!(orders.len(), 1);
         assert_eq!(orders[0].customer_name, "Alpha");
@@ -229,8 +242,8 @@ mod tests {
     #[test]
     fn get_orders_returns_all_of_same_type() {
         let conn = setup();
-        let id1 = create_order(&conn, "Alpha", "item a", "order").unwrap();
-        let id2 = create_order(&conn, "Beta", "item b", "order").unwrap();
+        let id1 = create_order(&conn, "Alpha", "item a", "order", "Kasir 1").unwrap();
+        let id2 = create_order(&conn, "Beta", "item b", "order", "Kasir 1").unwrap();
         let orders = get_orders(&conn, "order").unwrap();
         assert_eq!(orders.len(), 2);
         let ids: Vec<i64> = orders.iter().map(|o| o.id).collect();
@@ -241,7 +254,7 @@ mod tests {
     #[test]
     fn update_order_success() {
         let conn = setup();
-        let id = create_order(&conn, "Old Name", "old content", "order").unwrap();
+        let id = create_order(&conn, "Old Name", "old content", "order", "Kasir 1").unwrap();
         update_order(&conn, id, "New Name", "new content").unwrap();
         let order = get_order(&conn, id).unwrap();
         assert_eq!(order.customer_name, "New Name");
@@ -258,7 +271,7 @@ mod tests {
     #[test]
     fn delete_order_success() {
         let conn = setup();
-        let id = create_order(&conn, "To Delete", "stuff", "order").unwrap();
+        let id = create_order(&conn, "To Delete", "stuff", "order", "Kasir 1").unwrap();
         delete_order(&conn, id).unwrap();
         let err = get_order(&conn, id).unwrap_err();
         assert_eq!(err, rusqlite::Error::QueryReturnedNoRows);
@@ -279,7 +292,7 @@ mod tests {
             [],
         )
         .unwrap();
-        create_order(&conn, "Recent", "stuff", "order").unwrap();
+        create_order(&conn, "Recent", "stuff", "order", "Kasir 1").unwrap();
 
         let deleted = delete_orders_older_than(&conn, 365).unwrap();
         assert_eq!(deleted, 1);
@@ -292,7 +305,7 @@ mod tests {
     #[test]
     fn delete_orders_older_than_keeps_recent() {
         let conn = setup();
-        create_order(&conn, "New", "item", "order").unwrap();
+        create_order(&conn, "New", "item", "order", "Kasir 1").unwrap();
         let deleted = delete_orders_older_than(&conn, 365).unwrap();
         assert_eq!(deleted, 0);
         assert_eq!(get_orders(&conn, "order").unwrap().len(), 1);

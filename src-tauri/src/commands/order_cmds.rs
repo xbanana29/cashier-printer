@@ -1,4 +1,4 @@
-use crate::db::{orders, DbConn};
+use crate::db::{orders, settings, DbConn};
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 
@@ -9,6 +9,7 @@ pub struct OrderDto {
     pub content: String,
     pub order_type: String,
     pub created_at: String,
+    pub pc_name: String,
 }
 
 impl From<orders::Order> for OrderDto {
@@ -19,6 +20,7 @@ impl From<orders::Order> for OrderDto {
             content: o.content,
             order_type: o.order_type,
             created_at: o.created_at,
+            pc_name: o.pc_name,
         }
     }
 }
@@ -31,7 +33,9 @@ pub async fn create_order(
     order_type: String,
 ) -> Result<i64, AppError> {
     let conn = state.lock().map_err(|_| AppError::Database("lock poisoned".into()))?;
-    orders::create_order(&conn, &customer_name, &content, &order_type).map_err(AppError::from)
+    let pc_name = settings::get_setting(&conn, "pc_name").unwrap_or_default();
+    orders::create_order(&conn, &customer_name, &content, &order_type, &pc_name)
+        .map_err(AppError::from)
 }
 
 #[tauri::command]

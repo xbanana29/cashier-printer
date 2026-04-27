@@ -89,10 +89,8 @@ fn is_double_tall(font_size: &str) -> bool {
     }
 }
 
-/// ESC/POS GS ! byte that encodes the requested content font size.
-/// Supports both legacy keywords ("normal","tall","wide","large") and numeric pt values (8–24).
-///
-/// Numeric mapping:  ≤13 → normal (1×1) · 14–17 → tall (1×2) · 18–21 → wide (2×1) · 22+ → large (2×2)
+/// ESC/POS `GS !` byte (0x1D 0x21 n) for thermal printers.
+/// Bits 0-2 = width multiplier-1, bits 4-6 = height multiplier-1.
 fn content_font_byte(font_size: &str) -> u8 {
     match font_size {
         "normal" => return 0x00,
@@ -106,6 +104,18 @@ fn content_font_byte(font_size: &str) -> u8 {
         14..=17 => 0x10,
         18..=21 => 0x01,
         _       => 0x11,
+    }
+}
+
+/// ESC/P `ESC !` byte (0x1B 0x21 n) for dot-matrix printers (e.g. EPSON TM-U220).
+/// Bit 4 (0x10) = double height, bit 5 (0x20) = double width.
+/// Sent alongside GS ! so both thermal and dot-matrix printers respond.
+fn content_escbang_byte(font_size: &str) -> u8 {
+    match font_size {
+        "tall"  => 0x10,
+        "wide"  => 0x20,
+        "large" => 0x30,
+        _ => 0x00,
     }
 }
 
@@ -261,6 +271,8 @@ pub fn build_receipt(order: &Order, settings: &AppSettings) -> Vec<u8> {
     let eff_width = effective_width(&settings.paper_size, &settings.content_font_size);
     let font_byte = content_font_byte(&settings.content_font_size);
 
+    let escbang_byte = content_escbang_byte(&settings.content_font_size);
+
     let driver = VecDriver::new();
     let driver_clone = driver.clone();
 
@@ -273,11 +285,13 @@ pub fn build_receipt(order: &Order, settings: &AppSettings) -> Vec<u8> {
             if order.order_type == "receipt" {
                 // ── TANDA TERIMA header ───────────────────────────────────────
                 printer.justify(JustifyMode::CENTER)?;
-                printer.custom(b"\x1D\x21\x10")?; // double height
+                printer.custom(b"\x1D\x21\x10")?; // GS ! double height (thermal)
+                printer.custom(b"\x1B\x21\x10")?; // ESC ! double height (dot-matrix)
                 printer.bold(true)?;
                 printer.writeln("TANDA TERIMA")?;
                 printer.bold(false)?;
                 printer.custom(b"\x1D\x21\x00")?;
+                printer.custom(b"\x1B\x21\x00")?;
                 printer.justify(JustifyMode::LEFT)?;
 
                 printer.writeln(&format!("  Diterima dari : {}", order.customer_name))?;
@@ -285,13 +299,15 @@ pub fn build_receipt(order: &Order, settings: &AppSettings) -> Vec<u8> {
                 printer.writeln("")?;
 
                 // ── Content items ─────────────────────────────────────────────
-                printer.custom(&[0x1D, 0x21, font_byte])?;
+                printer.custom(&[0x1D, 0x21, font_byte])?;    // thermal
+                printer.custom(&[0x1B, 0x21, escbang_byte])?; // dot-matrix
                 for item in order.content.lines() {
                     for line in format_plain_line(item, eff_width) {
                         printer.writeln(&line)?;
                     }
                 }
                 printer.custom(b"\x1D\x21\x00")?;
+                printer.custom(b"\x1B\x21\x00")?;
                 printer.writeln("")?;
 
                 // ── Signature area ────────────────────────────────────────────
@@ -307,26 +323,28 @@ pub fn build_receipt(order: &Order, settings: &AppSettings) -> Vec<u8> {
             } else {
                 // ── Customer name: centred, double-height, bold ───────────────
                 printer.justify(JustifyMode::CENTER)?;
-                // GS ! 0x10 → double height (height×2, width×1)
-                printer.custom(b"\x1D\x21\x10")?;
+                printer.custom(b"\x1D\x21\x10")?; // GS ! double height (thermal)
+                printer.custom(b"\x1B\x21\x10")?; // ESC ! double height (dot-matrix)
                 printer.bold(true)?;
                 printer.writeln(&order.customer_name)?;
                 printer.bold(false)?;
-                // GS ! 0x00 → reset to normal size
                 printer.custom(b"\x1D\x21\x00")?;
+                printer.custom(b"\x1B\x21\x00")?;
                 printer.justify(JustifyMode::LEFT)?;
 
                 printer.writeln(&format!("  Tanggal  : {}", order.created_at))?;
                 printer.writeln("")?;
 
                 // ── Content items with configured font size ───────────────────
-                printer.custom(&[0x1D, 0x21, font_byte])?;
+                printer.custom(&[0x1D, 0x21, font_byte])?;    // thermal
+                printer.custom(&[0x1B, 0x21, escbang_byte])?; // dot-matrix
                 for item in order.content.lines() {
                     for line in format_item_line(item, eff_width) {
                         printer.writeln(&line)?;
                     }
                 }
                 printer.custom(b"\x1D\x21\x00")?;
+                printer.custom(b"\x1B\x21\x00")?;
                 printer.writeln("")?;
 
                 // ── Footer ────────────────────────────────────────────────────
@@ -401,6 +419,7 @@ mod tests {
             content: content.to_string(),
             order_type: "order".to_string(),
             created_at: "2026-04-24 10:00:00".to_string(),
+            pc_name: String::new(),
         }
     }
 
@@ -411,6 +430,7 @@ mod tests {
             content: content.to_string(),
             order_type: "receipt".to_string(),
             created_at: "2026-04-24 10:00:00".to_string(),
+            pc_name: String::new(),
         }
     }
 
@@ -882,6 +902,7 @@ pub fn build_test_receipt(settings: &AppSettings) -> Vec<u8> {
         content: "2 sak aci\n1 sak terigu\n10 kg gula los\n40 kg minyak curah goreng kemasan besar ekonomis\nPesanan dengan nama barang yang sangat panjang sekali sampai harus lanjut baris berikutnya\n5 karton teh botol sosro".to_string(),
         order_type: "order".to_string(),
         created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        pc_name: String::new(),
     };
     build_receipt(&test_order, settings)
 }

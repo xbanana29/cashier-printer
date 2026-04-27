@@ -17,6 +17,6 @@ pub async fn sync_now(
     db: State<'_, DbConn>,
     peers: State<'_, PeerMap>,
 ) -> Result<usize, AppError> {
-    let count = client::sync_from_all_peers(&db, &peers, "");
+    let count = client::sync_from_all_peers(&db, &peers);
     Ok(count)
 }

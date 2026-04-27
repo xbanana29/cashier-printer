@@ -29,25 +29,32 @@ pub fn start(db: DbConn, device_id: String, pc_name: String) -> PeerMap {
     // Bind HTTP server first so we know which port to advertise
     let server_port = server::start(db.clone(), device_id.clone(), pc_name.clone());
 
+    // Channel: discover thread signals sync thread when a new peer is first seen
+    let (new_peer_tx, new_peer_rx) = std::sync::mpsc::channel::<()>();
+
     // UDP discovery: broadcast our info + listen for peers
     discover::start(
         peers.clone(),
         device_id.clone(),
         pc_name.clone(),
         server_port,
+        new_peer_tx,
     );
 
-    // Periodic sync: wait 4s for initial peer discovery, then sync every 30s
+    // Periodic sync thread: syncs immediately on new-peer signal, or every 30s otherwise
     {
         let db = db.clone();
         let peers = peers.clone();
-        let device_id = device_id.clone();
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_secs(4));
-            client::sync_from_all_peers(&db, &peers, &device_id);
+            // Short initial delay so UDP discovery can hear the first heartbeats
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            client::sync_from_all_peers(&db, &peers);
             loop {
-                std::thread::sleep(std::time::Duration::from_secs(30));
-                client::sync_from_all_peers(&db, &peers, &device_id);
+                // Block until new peer found OR 30s timeout — whichever comes first
+                let _ = new_peer_rx.recv_timeout(std::time::Duration::from_secs(30));
+                // Drain any extra signals that arrived while we were syncing
+                while new_peer_rx.try_recv().is_ok() {}
+                client::sync_from_all_peers(&db, &peers);
             }
         });
     }

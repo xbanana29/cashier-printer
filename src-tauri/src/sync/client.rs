@@ -3,7 +3,7 @@ use crate::db::orders::{get_orders_for_sync, insert_sync_order, SyncOrder};
 use super::{PeerInfo, PeerMap};
 
 /// Pull orders from every known peer. Returns total orders inserted.
-pub fn sync_from_all_peers(db: &DbConn, peers: &PeerMap, _my_device_id: &str) -> usize {
+pub fn sync_from_all_peers(db: &DbConn, peers: &PeerMap) -> usize {
     let peer_list: Vec<PeerInfo> = {
         let map = peers.lock().expect("peers lock poisoned");
         map.values().cloned().collect()

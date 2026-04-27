@@ -193,8 +193,8 @@
             <div class="card-preview">{contentPreview(order.content)}</div>
             <div class="card-meta">
               <span class="card-date">{order.created_at}</span>
-              {#if pcName}
-                <span class="card-pc">{pcName}</span>
+              {#if order.pc_name}
+                <span class="card-pc">{order.pc_name}</span>
               {/if}
             </div>
           </div>

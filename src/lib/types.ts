@@ -4,6 +4,8 @@ export interface Order {
   content: string;
   order_type: string;
   created_at: string;
+  /** Workstation name that created this order (from settings.pc_name at insert time). */
+  pc_name: string;
 }
 
 export interface AppSettings {

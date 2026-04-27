@@ -14,7 +14,9 @@ const SCHEMA_SQL: &str = "
         customer_name TEXT NOT NULL,
         content       TEXT NOT NULL,
         order_type    TEXT NOT NULL DEFAULT 'order',
-        created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+        sync_id       TEXT UNIQUE,
+        pc_name       TEXT NOT NULL DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS settings (
@@ -39,16 +41,24 @@ pub fn init(app_data_dir: &std::path::Path) -> Result<DbConn> {
     let conn = Connection::open(&db_path)?;
     conn.execute_batch(SCHEMA_SQL)?;
 
-    // Migration: add order_type if missing (no-op when already exists)
+    // Migrations (each is no-op if column/index already exists)
     let _ = conn.execute_batch(
         "ALTER TABLE orders ADD COLUMN order_type TEXT NOT NULL DEFAULT 'order';",
     );
-    // Migration: add sync_id if missing
     let _ = conn.execute_batch(
         "ALTER TABLE orders ADD COLUMN sync_id TEXT;",
     );
+    let _ = conn.execute_batch(
+        "ALTER TABLE orders ADD COLUMN pc_name TEXT NOT NULL DEFAULT '';",
+    );
+    // UNIQUE index on sync_id — makes INSERT OR IGNORE actually skip duplicates.
+    // Partial index (WHERE sync_id IS NOT NULL) avoids conflicts on legacy rows with NULL.
+    let _ = conn.execute_batch(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_sync_id \
+         ON orders (sync_id) WHERE sync_id IS NOT NULL;",
+    );
 
-    // Generate sync_ids for existing orders that don't have one
+    // Backfill sync_ids for existing orders that don't have one
     let ids_without_sync_id: Vec<i64> = {
         let mut stmt = conn.prepare("SELECT id FROM orders WHERE sync_id IS NULL")?;
         let ids: Vec<i64> = stmt.query_map([], |r| r.get(0))?
