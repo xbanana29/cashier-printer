@@ -55,12 +55,12 @@ impl Driver for VecDriver {
 
 /// Number of printable characters per line for each paper width.
 ///
-/// TM-U220 (9-pin, 76mm): Font A = 40 cols. Using 42 causes the last 2 chars of
-/// a 42-char line to overflow, splitting " [ ]" as "[" on line N, "]" on line N+1.
+/// TM-U220 (9-pin, 76mm): Font A = 38 cols usable. Physical max ~40 but using 40
+/// causes " [ ]" to overflow — the last chars spill to the next line in practice.
 fn char_width(paper_size: &str) -> usize {
     match paper_size {
         "58mm" => 32,
-        "75mm" => 40, // TM-U220 / 76mm dot-matrix: 40 cols (Font A)
+        "75mm" => 38, // TM-U220 / 76mm dot-matrix: 38 cols (safe usable width)
         _ => 48,       // 80mm default
     }
 }
@@ -368,9 +368,9 @@ mod tests {
     }
 
     #[test]
-    fn item_line_75mm_never_exceeds_40_chars() {
-        // Regression guard: 75mm=42 caused " [ ]" to split across lines on TM-U220.
-        // Every formatted line must be ≤ 40 chars so nothing overflows the printer margin.
+    fn item_line_75mm_never_exceeds_38_chars() {
+        // Regression guard: 75mm=40 caused " [ ]" to split across lines on TM-U220 in practice.
+        // Every formatted line must be ≤ 38 chars so nothing overflows the printer margin.
         let total_width = char_width("75mm"); // must be 40
         let items = [
             "2slop signatur",
@@ -405,9 +405,9 @@ mod tests {
 
     #[test]
     fn char_width_75mm() {
-        // TM-U220 (9-pin dot-matrix, 76mm paper) prints 40 columns per line in Font A.
-        // 42 caused " [ ]" to overflow: "[" at end of line, "]" on next line.
-        assert_eq!(char_width("75mm"), 40);
+        // TM-U220 (9-pin dot-matrix, 76mm paper): physical max ~40 cols but 40 causes
+        // " [ ]" to overflow in practice, so usable safe width is 38.
+        assert_eq!(char_width("75mm"), 38);
     }
 
     #[test]
