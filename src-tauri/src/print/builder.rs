@@ -332,6 +332,9 @@ pub fn build_receipt(order: &Order, settings: &AppSettings) -> Vec<u8> {
             } else {
                 printer.print()?;
             }
+            // Reset printer to factory defaults so the next job from any app
+            // (e.g. the POS system) always starts from a clean state.
+            printer.custom(b"\x1B\x40")?;
             Ok(())
         })();
 
