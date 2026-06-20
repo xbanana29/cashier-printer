@@ -1,0 +1,18 @@
+{
+	"/": [
+		"src/routes/+layout.ts",
+		"src/routes/+layout.ts"
+	],
+	"/edit/[id]": [
+		"src/routes/+layout.ts"
+	],
+	"/history": [
+		"src/routes/+layout.ts"
+	],
+	"/new": [
+		"src/routes/+layout.ts"
+	],
+	"/settings": [
+		"src/routes/+layout.ts"
+	]
+}

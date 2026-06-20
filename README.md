@@ -1,7 +1,7 @@
 # Print Paste Order (PPO)
 
 Aplikasi desktop ringan untuk kasir toko kecil — input pesanan, cetak struk termal, simpan riwayat, dan sinkron otomatis antar kasir dalam satu jaringan.  
-Dibuat dengan **Tauri 2 · Svelte 5 · Rust · SQLite** — berjalan 100% offline, tanpa server, tanpa internet.
+Dibuat dengan **Tauri 2 · Dioxus (Rust → WASM) · Rust · SQLite** — berjalan 100% offline, tanpa server, tanpa internet.
 
 ---
 
@@ -148,8 +148,9 @@ PC: Kasir 1
 
 ### Prasyarat
 
-- [Bun](https://bun.sh) ≥ 1.0
-- [Rust](https://rustup.rs) stable
+- [Rust](https://rustup.rs) stable + target `wasm32-unknown-unknown`
+- [Trunk](https://trunkrs.dev) — bundler WASM (`cargo install trunk` atau unduh binari prebuilt)
+- Tauri CLI v2 — `cargo install tauri-cli --version "^2"`
 - Tauri v2 system dependencies — lihat [Prerequisites Tauri](https://v2.tauri.app/start/prerequisites/)
 
 ### Langkah
@@ -159,14 +160,16 @@ PC: Kasir 1
 git clone https://github.com/nikokevin29/cashier-printer.git
 cd cashier-printer
 
-# Install dependensi frontend
-bun install
+# Siapkan toolchain (sekali saja)
+rustup target add wasm32-unknown-unknown
+cargo install trunk
+cargo install tauri-cli --version "^2"
 
-# Jalankan mode development
-bun run tauri dev
+# Jalankan mode development (Tauri menjalankan `trunk serve` otomatis)
+cargo tauri dev
 
 # Build production (platform saat ini)
-bun run tauri build
+cargo tauri build
 ```
 
 Output binary ada di `src-tauri/target/release/bundle/`.
@@ -184,18 +187,22 @@ cargo test
 
 ```
 cashier-printer/
-├── src/
-│   ├── lib/
-│   │   ├── api.ts               # Wrapper typed untuk invoke() Tauri
-│   │   ├── stores.svelte.ts     # Toast & state global (Svelte 5 runes)
-│   │   ├── types.ts             # Order, AppSettings, PrinterInfo, PeerInfo
-│   │   └── GuidedTextarea.svelte # Textarea dengan garis batas kolom
-│   └── routes/
-│       ├── +layout.svelte       # Navigation Rail MD3 + toast overlay
-│       ├── new/                 # Form pesanan baru
-│       ├── history/             # Riwayat + search + pagination + preview
-│       ├── edit/[id]/           # Edit pesanan
-│       └── settings/            # Pengaturan printer, template & LAN sync
+├── index.html                  # Mount point WASM + font (dipakai Trunk)
+├── Trunk.toml                  # Konfigurasi bundler WASM (serve di :1420)
+├── Cargo.toml                  # Crate frontend Dioxus (cashier-printer-ui)
+├── assets/
+│   ├── styles.css              # Seluruh style (MD3 tokens, di-scope per halaman)
+│   └── favicon.png
+├── src/                        # Frontend Dioxus (Rust → WASM)
+│   ├── main.rs                 # App shell: Navigation Rail + router + toast
+│   ├── api.rs                  # Wrapper typed invoke() via window.__TAURI__
+│   ├── types.rs                # Order, AppSettings, PrinterInfo, PeerInfo
+│   ├── components.rs           # GuidedTextarea (garis batas kolom)
+│   └── views/
+│       ├── new.rs              # Form pesanan baru
+│       ├── history.rs          # Riwayat + search + pagination + preview
+│       ├── edit.rs             # Edit pesanan
+│       └── settings.rs         # Pengaturan printer, template, update & LAN sync
 └── src-tauri/src/
     ├── db/
     │   ├── mod.rs               # Inisialisasi SQLite + schema + migrasi
@@ -209,7 +216,7 @@ cashier-printer/
     │   ├── discover.rs          # UDP broadcast peer discovery
     │   ├── server.rs            # HTTP server (GET /sync, POST /push)
     │   └── client.rs            # HTTP client sinkron dari peer
-    ├── commands/                # Tauri commands (order, print, settings, sync)
+    ├── commands/                # Tauri commands (order, print, settings, sync, app/updater/opener)
     ├── error.rs                 # AppError dengan serde + thiserror
     └── lib.rs                   # Tauri builder + state init
 ```

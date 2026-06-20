@@ -1,0 +1,15 @@
+# Trunk drives the wasm build/serve for the Dioxus frontend.
+# Tauri invokes `trunk serve` (dev) and `trunk build --release` (bundle).
+[build]
+target = "index.html"
+dist = "dist"
+
+[serve]
+# Must match `build.devUrl` in src-tauri/tauri.conf.json.
+address = "127.0.0.1"
+port = 1420
+open = false
+
+[watch]
+# Don't rebuild the wasm frontend when the Rust backend changes.
+ignore = ["src-tauri", "dist"]

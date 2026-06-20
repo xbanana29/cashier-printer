@@ -4,12 +4,13 @@
   "version": "0.9.91",
   "identifier": "com.yourco.cashierprinter",
   "build": {
-    "beforeDevCommand": "bun run dev",
+    "beforeDevCommand": "trunk serve",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run build",
-    "frontendDist": "../build"
+    "beforeBuildCommand": "trunk build --release",
+    "frontendDist": "../dist"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "Print Paste Order (PPO)",
