@@ -5,6 +5,10 @@ description = "Cashier Order Print Desktop App"
 authors = ["you"]
 edition = "2021"
 
+# Isolate this crate as its own workspace root so cargo does not try to absorb
+# it into the sibling Dioxus UI crate's manifest at the repository root.
+[workspace]
+
 [lib]
 name = "cashier_printer_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
