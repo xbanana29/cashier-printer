@@ -328,13 +328,21 @@ pub fn build_receipt(order: &Order, settings: &AppSettings) -> Vec<u8> {
 
             printer.feeds(3 + settings.extra_feeds)?;
             if settings.auto_cut {
-                printer.print_cut()?;
-            } else {
-                printer.print()?;
+                // Buffer the cut but DON'T flush yet — print_cut() flushes
+                // immediately, which would drop the reset queued below.
+                printer.cut()?;
             }
             // Reset printer to factory defaults so the next job from any app
-            // (e.g. the POS system) always starts from a clean state.
+            // (e.g. the shared POS system) always starts from a clean state and
+            // our last style/line-spacing doesn't corrupt its output.
+            //
+            // This MUST be buffered before the single print()/flush() below:
+            // escpos only writes queued commands on print(), and there is no
+            // flush-on-drop. The previous code reset *after* print_cut()/print()
+            // had already flushed, so the reset was silently discarded and never
+            // reached the printer.
             printer.custom(b"\x1B\x40")?;
+            printer.print()?;
             Ok(())
         })();
 
@@ -665,6 +673,30 @@ mod tests {
             bytes.windows(3).any(|w| w == [0x1D, 0x21, 0x00]),
             "missing size-reset GS!0x00"
         );
+    }
+
+    #[test]
+    fn build_receipt_ends_with_reset_so_next_job_is_clean() {
+        // Regression guard for the shared-printer "POS spacing corruption" bug.
+        //
+        // escpos buffers commands and only writes them to the driver on print()
+        // (which then empties the buffer). A reset added *after* print_cut()/print()
+        // is therefore never flushed and never reaches the printer. The reset
+        // (ESC @) must be the FINAL bytes of the stream so the next application's
+        // job (e.g. the POS) starts from a clean state.
+        let order = make_order("X", "item");
+        let mut settings = default_settings();
+        for auto_cut in [true, false] {
+            settings.auto_cut = auto_cut;
+            let bytes = build_receipt(&order, &settings);
+            let tail = &bytes[bytes.len().saturating_sub(2)..];
+            assert_eq!(
+                tail,
+                [0x1B, 0x40],
+                "receipt (auto_cut={auto_cut}) must END with ESC @ reset; last bytes: {:02X?}",
+                &bytes[bytes.len().saturating_sub(6)..]
+            );
+        }
     }
 
     #[test]
