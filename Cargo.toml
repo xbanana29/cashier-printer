@@ -3,7 +3,7 @@
 # The Tauri backend lives in its own standalone crate at ./src-tauri.
 [package]
 name = "cashier-printer-ui"
-version = "0.9.91"
+version = "0.9.93"
 description = "Dioxus WASM frontend for Print Paste Order"
 edition = "2021"
 license = "MIT"
