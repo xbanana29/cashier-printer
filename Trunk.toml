@@ -12,4 +12,6 @@ open = false
 
 [watch]
 # Don't rebuild the wasm frontend when the Rust backend changes.
-ignore = ["src-tauri", "dist"]
+# Only list paths that exist on a fresh checkout — recent Trunk hard-errors
+# when canonicalizing a non-existent ignore path (e.g. "dist" before first build).
+ignore = ["src-tauri"]

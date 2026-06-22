@@ -9,3 +9,8 @@
 # Rust build artifacts
 /target
 src-tauri/target/
+
+# Leftover SvelteKit artifacts from the pre-Dioxus version (no longer used)
+/node_modules
+/.svelte-kit
+/build
