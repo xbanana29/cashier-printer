@@ -32,6 +32,28 @@ pub fn sync_from_all_peers(db: &DbConn, peers: &PeerMap) -> usize {
     total
 }
 
+/// Ping a peer's /ping endpoint to validate it and read its identity.
+/// Returns (device_id, pc_name).
+pub fn ping_peer(addr: &str) -> Result<(String, String), String> {
+    let url = format!("http://{addr}/ping");
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(std::time::Duration::from_secs(3))
+        .timeout(std::time::Duration::from_secs(5))
+        .build();
+    let v: ureq::serde_json::Value = agent
+        .get(&url)
+        .call()
+        .map_err(|e| e.to_string())?
+        .into_json()
+        .map_err(|e| format!("JSON parse: {e}"))?;
+    let device_id = v["device_id"].as_str().unwrap_or("").to_string();
+    let pc_name = v["pc_name"].as_str().unwrap_or("").to_string();
+    if device_id.is_empty() {
+        return Err("bukan server sinkronisasi yang valid".into());
+    }
+    Ok((device_id, pc_name))
+}
+
 fn pull_from_peer(db: &DbConn, peer: &PeerInfo) -> Result<usize, String> {
     let url = format!("http://{}/sync", peer.addr);
     let agent = ureq::AgentBuilder::new()

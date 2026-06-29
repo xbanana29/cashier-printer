@@ -4,7 +4,7 @@
 use dioxus::prelude::*;
 
 use crate::api;
-use crate::types::{AppSettings, PeerInfo, PrinterInfo};
+use crate::types::{AppSettings, PeerInfo, PrinterInfo, SyncInfo};
 use crate::Toasts;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -94,6 +94,10 @@ pub fn Settings() -> Element {
 
     let peers = use_signal(Vec::<PeerInfo>::new);
     let syncing = use_signal(|| false);
+    let sync_info = use_signal(|| None::<SyncInfo>);
+    let fixing_fw = use_signal(|| false);
+    let manual_addr = use_signal(String::new);
+    let adding_peer = use_signal(|| false);
     let current_version = use_signal(|| "—".to_string());
     let update_status = use_signal(|| UpdateStatus::Idle);
     // Pending update info: (version, release notes).
@@ -114,6 +118,10 @@ pub fn Settings() -> Element {
         if let Ok(p) = api::get_peers().await {
             let mut pr = peers;
             pr.set(p);
+        }
+        if let Ok(info) = api::get_sync_info().await {
+            let mut si = sync_info;
+            si.set(Some(info));
         }
     });
 
@@ -138,6 +146,10 @@ pub fn Settings() -> Element {
     let ui = update_data();
     let peer_list = peers();
     let version = current_version();
+    let si = sync_info();
+    let is_fixing_fw = fixing_fw();
+    let manual_addr_val = manual_addr();
+    let is_adding_peer = adding_peer();
 
     let conn_os = if ct == "os" { "conn-tab conn-tab-active" } else { "conn-tab" };
     let conn_serial = if ct == "serial" { "conn-tab conn-tab-active" } else { "conn-tab" };
@@ -454,11 +466,18 @@ pub fn Settings() -> Element {
                                 {
                                     let last = format_last_seen(peer.last_seen);
                                     let name = if peer.pc_name.is_empty() { "Tanpa nama".to_string() } else { peer.pc_name.clone() };
+                                    let is_manual = peer.manual;
+                                    let paddr = peer.addr.clone();
                                     rsx! {
                                         div { key: "{peer.device_id}", class: "peer-row",
-                                            span { class: "material-symbols-outlined peer-icon", "computer" }
+                                            span { class: "material-symbols-outlined peer-icon",
+                                                if is_manual { "lan" } else { "computer" }
+                                            }
                                             div { class: "peer-info",
-                                                span { class: "peer-name", "{name}" }
+                                                span { class: "peer-name",
+                                                    "{name}"
+                                                    if is_manual { " (manual)" }
+                                                }
                                                 span { class: "peer-addr", "{peer.addr}" }
                                             }
                                             div { class: "peer-meta",
@@ -466,12 +485,128 @@ pub fn Settings() -> Element {
                                                     span { class: "peer-badge", "{peer.orders_synced} order" }
                                                 }
                                                 span { class: "peer-seen", "{last}" }
+                                                if is_manual {
+                                                    button {
+                                                        r#type: "button",
+                                                        class: "icon-btn",
+                                                        title: "Hapus peer manual",
+                                                        onclick: move |_| {
+                                                            let addr = paddr.clone();
+                                                            spawn(async move {
+                                                                match api::remove_manual_peer(&addr).await {
+                                                                    Ok(()) => {
+                                                                        toasts.show("Peer dihapus");
+                                                                        if let Ok(p) = api::get_peers().await { let mut pr = peers; pr.set(p); }
+                                                                    }
+                                                                    Err(e) => toasts.error(e),
+                                                                }
+                                                            });
+                                                        },
+                                                        span { class: "material-symbols-outlined", "delete" }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
                         }
+                    }
+                }
+                // Manual peer (for networks where broadcast discovery is blocked)
+                div { class: "field",
+                    label { r#for: "manual-peer", class: "field-label", "Tambah Perangkat Manual" }
+                    div { class: "row-gap",
+                        input {
+                            id: "manual-peer",
+                            class: "field-input",
+                            r#type: "text",
+                            placeholder: "IP PC lain, contoh: 192.168.1.50",
+                            value: "{manual_addr_val}",
+                            oninput: move |e| { let mut m = manual_addr; m.set(e.value()); },
+                        }
+                        button {
+                            r#type: "button",
+                            class: "icon-btn",
+                            title: "Tambah",
+                            disabled: is_adding_peer || manual_addr_val.trim().is_empty(),
+                            onclick: move |_| {
+                                let addr = manual_addr.peek().trim().to_string();
+                                if addr.is_empty() { return; }
+                                let mut ap = adding_peer; ap.set(true);
+                                spawn(async move {
+                                    match api::add_manual_peer(&addr).await {
+                                        Ok(()) => {
+                                            toasts.show("Perangkat ditambahkan");
+                                            let mut m = manual_addr; m.set(String::new());
+                                            if let Ok(p) = api::get_peers().await { let mut pr = peers; pr.set(p); }
+                                        }
+                                        Err(e) => toasts.error(e),
+                                    }
+                                    let mut ap2 = adding_peer; ap2.set(false);
+                                });
+                            },
+                            span { class: "material-symbols-outlined",
+                                if is_adding_peer { "hourglass_empty" } else { "add" }
+                            }
+                        }
+                    }
+                    p { class: "field-support", "Pakai ini kalau perangkat tidak muncul otomatis. Port default 47289 ditambahkan bila tidak ditulis. Perangkat tujuan harus menyala & aplikasi terbuka." }
+                }
+
+                // Diagnostic info + firewall fix
+                if let Some(info) = si.clone() {
+                    div { class: "field",
+                        span { class: "field-label", "Parameter Sinkronisasi" }
+                        div { class: "about-row",
+                            span { class: "about-label", "IP PC ini" }
+                            span { class: "about-value", "{info.local_ip}" }
+                        }
+                        div { class: "about-row",
+                            span { class: "about-label", "Port discovery (UDP)" }
+                            span { class: "about-value", "{info.discovery_port}" }
+                        }
+                        div { class: "about-row",
+                            span { class: "about-label", "Port sync (TCP)" }
+                            span { class: "about-value", "{info.sync_port}" }
+                        }
+                        div { class: "about-row",
+                            span { class: "about-label", "Profil jaringan" }
+                            span { class: "about-value", "{info.network_profile}" }
+                        }
+                        div { class: "about-row",
+                            span { class: "about-label", "Device ID" }
+                            span { class: "about-value", "{info.device_id}" }
+                        }
+                        if info.network_profile.contains("Public") {
+                            p { class: "field-support", style: "color: var(--danger, #c0392b)",
+                                "Jaringan ini berprofil Public — firewall Windows biasanya memblokir penemuan perangkat. Klik \"Perbaiki Firewall\" lalu setujui prompt admin (UAC)."
+                            }
+                        }
+                    }
+                    div { class: "field",
+                        button {
+                            r#type: "button",
+                            class: "btn-outlined",
+                            disabled: is_fixing_fw,
+                            onclick: move |_| {
+                                let mut fw = fixing_fw; fw.set(true);
+                                spawn(async move {
+                                    match api::fix_firewall().await {
+                                        Ok(()) => toasts.show("Setujui prompt admin (UAC) untuk membuka port sinkronisasi"),
+                                        Err(e) => toasts.error(e),
+                                    }
+                                    // Refresh profile/info after the rules are applied
+                                    if let Ok(i) = api::get_sync_info().await { let mut s2 = sync_info; s2.set(Some(i)); }
+                                    let mut fw2 = fixing_fw; fw2.set(false);
+                                });
+                            },
+                            span { class: "material-symbols-outlined",
+                                if is_fixing_fw { "hourglass_empty" } else { "shield" }
+                            }
+                            if is_fixing_fw { "Memperbaiki..." } else { "Perbaiki Firewall" }
+                        }
+                        p { class: "field-support", "Membuka port UDP {info.discovery_port} & TCP {info.sync_port} di firewall Windows untuk semua profil (termasuk Public). Perlu izin admin." }
                     }
                 }
                 div { class: "field", style: "margin-bottom: 0",

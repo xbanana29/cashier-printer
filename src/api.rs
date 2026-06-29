@@ -10,7 +10,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
-use crate::types::{AppSettings, Order, PeerInfo, PrinterInfo, UpdateInfo};
+use crate::types::{AppSettings, Order, PeerInfo, PrinterInfo, SyncInfo, UpdateInfo};
 
 #[wasm_bindgen]
 extern "C" {
@@ -220,6 +220,30 @@ pub async fn get_peers() -> Result<Vec<PeerInfo>, AppError> {
 
 pub async fn sync_now() -> Result<u64, AppError> {
     invoke("sync_now", no_args()).await
+}
+
+pub async fn get_sync_info() -> Result<SyncInfo, AppError> {
+    invoke("get_sync_info", no_args()).await
+}
+
+pub async fn fix_firewall() -> Result<(), AppError> {
+    invoke_unit("fix_firewall", no_args()).await
+}
+
+pub async fn add_manual_peer(addr: &str) -> Result<(), AppError> {
+    #[derive(Serialize)]
+    struct Args<'a> {
+        addr: &'a str,
+    }
+    invoke_unit("add_manual_peer", to_args(&Args { addr })).await
+}
+
+pub async fn remove_manual_peer(addr: &str) -> Result<(), AppError> {
+    #[derive(Serialize)]
+    struct Args<'a> {
+        addr: &'a str,
+    }
+    invoke_unit("remove_manual_peer", to_args(&Args { addr })).await
 }
 
 // ── App / updater / opener (moved from JS plugins to backend commands) ───────

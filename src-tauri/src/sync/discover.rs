@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::{PeerInfo, PeerMap};
 
 /// UDP port used for peer discovery broadcasts.
-const DISCOVERY_PORT: u16 = 47295;
+pub const DISCOVERY_PORT: u16 = 47295;
 /// Interval between "I'm alive" broadcasts.
 const BROADCAST_INTERVAL_SECS: u64 = 15;
 
@@ -126,6 +126,7 @@ fn listen_loop(peers: PeerMap, my_device_id: String, new_peer_tx: Sender<()>) {
                         addr: format!("{peer_ip}:{peer_port}"),
                         last_seen: now,
                         orders_synced: 0,
+                        manual: false,
                     });
                     entry.pc_name = peer_pc;
                     entry.addr = format!("{peer_ip}:{peer_port}");

@@ -1,7 +1,7 @@
 use crate::db::DbConn;
 use crate::db::orders::{get_orders_for_sync, insert_sync_order, SyncOrder};
 
-const BASE_PORT: u16 = 47289;
+pub const BASE_PORT: u16 = 47289;
 
 /// Bind the HTTP sync server on the first available port in [47289, 47295).
 /// Returns the bound port, or 0 if all ports are busy.

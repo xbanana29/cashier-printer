@@ -60,6 +60,17 @@ pub struct PeerInfo {
     pub addr: String,
     pub last_seen: u64,
     pub orders_synced: u32,
+    #[serde(default)]
+    pub manual: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct SyncInfo {
+    pub local_ip: String,
+    pub discovery_port: u16,
+    pub sync_port: String,
+    pub device_id: String,
+    pub network_profile: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
