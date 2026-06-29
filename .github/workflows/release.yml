@@ -73,34 +73,20 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Print Paste Order ${{ github.ref_name }}'
+          # Body ini juga jadi catatan update yang tampil di dalam aplikasi.
+          # Tiap rilis: cukup ganti daftar "Yang baru" di bawah. Jaga tetap plain-text
+          # (tanpa tabel/markdown berat) agar rapi saat ditampilkan di banner updater.
           releaseBody: |
-            ## Print Paste Order (PPO) ${{ github.ref_name }}
+            Print Paste Order ${{ github.ref_name }}
 
-            Aplikasi cetak struk pesanan untuk toko kecil — ringan, offline, tanpa instalasi server.
+            Yang baru:
+            • Tambah perangkat sinkronisasi manual via IP — untuk jaringan yang memblokir penemuan otomatis
+            • Panel diagnosa sinkronisasi LAN: IP, port, profil jaringan, device ID
+            • Tombol "Perbaiki Firewall" untuk membuka port sinkronisasi di Windows
+            • Logo aplikasi baru
 
-            ### Download
-
-            | Platform | File | Keterangan |
-            |---|---|---|
-            | Windows 64-bit | `*.exe` (NSIS) | Setup installer, tidak perlu admin |
-            | macOS Intel | `*_x64.dmg` | macOS 10.15+ |
-            | macOS Apple Silicon | `*_aarch64.dmg` | M1/M2/M3 |
-            | Linux 64-bit | `*.AppImage` | Portable, tidak perlu install |
-
-            ### Cara pakai
-            - **Windows**: Jalankan `.exe`, klik Next–Next–Finish
-            - **macOS**: Buka `.dmg`, drag app ke Applications
-            - **Linux**: `chmod +x *.AppImage` lalu jalankan langsung
-
-            ### Printer yang didukung
-            - RPP02 58mm (serial/USB)
-            - EPSON TM-U220 75mm (serial/USB, dengan/tanpa cutter)
-            - EPSON TM-T82X 80mm (USB / LAN)
-
-            ### Perubahan v0.9.9
-            - Fix layout cetak TM-U220 75mm: lebar kolom dikoreksi ke 33 (dari 38) agar checkbox tidak turun baris
-            - Tambah toggle **Tebalkan tulisan item** (bold/emphasized mode)
-            - Tambah toggle **Perbesar ukuran font item** (2× double-width + double-height)
+            Download: pilih file di bagian Assets di bawah
+            Windows .exe  •  macOS .dmg  •  Linux .AppImage
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}

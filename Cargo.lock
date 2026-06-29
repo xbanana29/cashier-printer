@@ -60,7 +60,7 @@ checksum = "8ae3f5d315924270530207e2a68396c3cc547f6dca3fbdca317cfb1a51edb593"
 
 [[package]]
 name = "cashier-printer-ui"
-version = "0.9.93"
+version = "0.9.94"
 dependencies = [
  "dioxus",
  "gloo-timers",
