@@ -91,7 +91,7 @@ fn App() -> Element {
             // ── MD3 Navigation Rail ──
             nav { class: "nav-rail",
                 div { class: "rail-brand",
-                    span { class: "brand-logo", "PPO" }
+                    img { class: "brand-logo", src: "/assets/main-logo.png", alt: "PPO" }
                     span { class: "brand-name", "Print Paste"
                         br {}
                         "Order"
